@@ -3,6 +3,7 @@ import { FoodItem, Restaurant } from "../models.js";
 import { requireRole, canVendor, hasVendorPermission, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
 import { toFoodItemDTO, toRestaurantDTO } from "./catalog.js";
+import { createFoodItem, updateFoodItem, MenuItemError } from "../lib/menuItems.js";
 
 export const vendorRouter = Router();
 vendorRouter.use(requireRole(canVendor, "Vendor access required"));
@@ -77,53 +78,15 @@ vendorRouter.get("/menu", async (req: AuthedRequest, res) => {
   }
 });
 
-function slugify(name: string): string {
-  return (
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "item"
-  );
-}
-
 vendorRouter.post("/menu", requireVendorPermission("CAN_MANAGE_PRODUCTS", "You don't have permission to add menu items."), async (req: AuthedRequest, res) => {
   try {
     const restaurant = await ownedRestaurant(req.user!);
     if (!restaurant) return res.status(404).json(fail("NOT_ASSIGNED", "No restaurant is linked to your account yet. Ask an admin to assign one."));
 
-    const body = req.body ?? {};
-    const name = String(body.name ?? "").trim();
-    const description = String(body.description ?? "").trim();
-    const price = Number(body.price);
-    const categoryKey = String(body.categoryKey ?? "").trim();
-
-    if (name.length < 2) return res.status(400).json(fail("INVALID_NAME", "Enter a dish name."));
-    if (!Number.isFinite(price) || price <= 0) return res.status(400).json(fail("INVALID_PRICE", "Enter a valid price."));
-    if (!categoryKey) return res.status(400).json(fail("INVALID_CATEGORY", "Choose a menu category."));
-
-    // A restaurant with no categories yet (freshly created by admin) gets one
-    // seeded automatically rather than rejecting the vendor's first item.
-    const categoryExists = (restaurant.categories ?? []).some((c: any) => c.key === categoryKey);
-    if (!categoryExists) {
-      await Restaurant.updateOne({ _id: restaurant._id }, { $push: { categories: { key: categoryKey, name: categoryKey, sortOrder: (restaurant.categories ?? []).length } } });
-    }
-
-    let slug = `${restaurant.slug}-${slugify(name)}`;
-    if (await FoodItem.exists({ slug })) slug = `${slug}-${Date.now().toString(36)}`;
-
-    const item = await FoodItem.create({
-      slug,
-      restaurantId: restaurant._id,
-      categoryKey,
-      name,
-      description,
-      price,
-      veg: Boolean(body.veg),
-      available: true,
-    });
-
+    const item = await createFoodItem(restaurant, req.body);
     res.json(ok({ item: toFoodItemDTO(item.toObject()) }, "Menu item created"));
   } catch (e) {
+    if (e instanceof MenuItemError) return res.status(e.status).json(fail(e.code, e.message));
     res.status(500).json(fail("MENU_ITEM_CREATE_FAILED", e instanceof Error ? e.message : "Could not create menu item"));
   }
 });
@@ -152,23 +115,24 @@ vendorRouter.patch("/menu/:id", async (req: AuthedRequest, res) => {
       return res.status(403).json(fail("FORBIDDEN", "You don't have permission to edit menu items."));
     }
 
-    if (body.name !== undefined) {
-      const name = String(body.name).trim();
-      if (name.length < 2) return res.status(400).json(fail("INVALID_NAME", "Enter a dish name."));
-      item.name = name;
-    }
-    if (body.description !== undefined) item.description = String(body.description).trim();
-    if (body.price !== undefined) {
-      const price = Number(body.price);
-      if (!Number.isFinite(price) || price <= 0) return res.status(400).json(fail("INVALID_PRICE", "Enter a valid price."));
-      item.price = price;
-    }
-    if (typeof body.veg === "boolean") item.veg = body.veg;
-    if (typeof body.available === "boolean") item.available = body.available;
-
-    await item.save();
-    res.json(ok({ item: toFoodItemDTO(item.toObject()) }, "Menu item updated"));
+    const updated = await updateFoodItem(item, body);
+    res.json(ok({ item: toFoodItemDTO(updated.toObject()) }, "Menu item updated"));
   } catch (e) {
+    if (e instanceof MenuItemError) return res.status(e.status).json(fail(e.code, e.message));
     res.status(500).json(fail("MENU_ITEM_UPDATE_FAILED", e instanceof Error ? e.message : "Could not update menu item"));
+  }
+});
+
+vendorRouter.delete("/menu/:id", requireVendorPermission("CAN_MANAGE_PRODUCTS", "You don't have permission to remove menu items."), async (req: AuthedRequest, res) => {
+  try {
+    const restaurant = await ownedRestaurant(req.user!);
+    if (!restaurant) return res.status(404).json(fail("NOT_ASSIGNED", "No restaurant is linked to your account yet."));
+
+    const item = await FoodItem.findOneAndDelete({ _id: req.params.id, restaurantId: restaurant._id });
+    if (!item) return res.status(404).json(fail("ITEM_NOT_FOUND", "Menu item not found"));
+
+    res.json(ok({ deleted: true }, "Menu item removed"));
+  } catch (e) {
+    res.status(500).json(fail("MENU_ITEM_DELETE_FAILED", e instanceof Error ? e.message : "Could not remove this menu item"));
   }
 });

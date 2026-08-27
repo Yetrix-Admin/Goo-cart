@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { AuditLog, Coupon, Order, Restaurant, Session, User } from "../models.js";
+import { AuditLog, Coupon, FoodItem, Order, Product, Restaurant, Session, User } from "../models.js";
 import { requireRole, canAdmin, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
-import { toRestaurantDTO } from "./catalog.js";
+import { toFoodItemDTO, toRestaurantDTO } from "./catalog.js";
 import { toOrderDTO } from "./orders.js";
 import { VENDOR_PERMISSIONS, TERMINAL_STATUSES } from "../lib/orderState.js";
 import { isValidCoordinate } from "../lib/geo.js";
@@ -10,6 +10,7 @@ import { emitToAdmin } from "../lib/realtime.js";
 import { notifyUser } from "../lib/push.js";
 import { unassignPartner } from "../lib/delivery.js";
 import { getPricingSettings, updatePricingSettings } from "../lib/pricingSettings.js";
+import { createFoodItem, updateFoodItem, MenuItemError } from "../lib/menuItems.js";
 import { EMAIL_RE, PHONE_RE } from "../lib/http.js";
 
 export const adminRouter = Router();
@@ -843,5 +844,160 @@ adminRouter.delete("/restaurants/:id/offers/:offerId", async (req: AuthedRequest
     res.json(ok({ restaurant: toRestaurantDTO(restaurant.toObject()) }, "Offer removed"));
   } catch (e) {
     res.status(500).json(fail("OFFER_DELETE_FAILED", e instanceof Error ? e.message : "Could not remove this offer"));
+  }
+});
+
+// --- Menu items (spec: admin must be able to manage everything, not just
+// wait for a vendor to log into the separate Vendor App) --------------------
+
+adminRouter.get("/restaurants/:id/menu", async (req, res) => {
+  try {
+    const restaurant = await Restaurant.findById(req.params.id, { _id: 1 }).lean();
+    if (!restaurant) return res.status(404).json(fail("RESTAURANT_NOT_FOUND", "Restaurant not found"));
+    const items = await FoodItem.find({ restaurantId: restaurant._id }).sort({ name: 1 }).lean();
+    res.json(ok({ items: items.map(toFoodItemDTO) }));
+  } catch (e) {
+    res.status(500).json(fail("MENU_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load this restaurant's menu"));
+  }
+});
+
+adminRouter.post("/restaurants/:id/menu", async (req: AuthedRequest, res) => {
+  try {
+    const restaurant = await Restaurant.findById(req.params.id);
+    if (!restaurant) return res.status(404).json(fail("RESTAURANT_NOT_FOUND", "Restaurant not found"));
+
+    const item = await createFoodItem(restaurant, req.body);
+    await audit(req, "menu_item.create", "food_item", String(item._id), null, { restaurantId: req.params.id, name: item.name });
+    res.json(ok({ item: toFoodItemDTO(item.toObject()) }, "Menu item created"));
+  } catch (e) {
+    if (e instanceof MenuItemError) return res.status(e.status).json(fail(e.code, e.message));
+    res.status(500).json(fail("MENU_ITEM_CREATE_FAILED", e instanceof Error ? e.message : "Could not create menu item"));
+  }
+});
+
+adminRouter.patch("/restaurants/:id/menu/:itemId", async (req: AuthedRequest, res) => {
+  try {
+    const item = await FoodItem.findOne({ _id: req.params.itemId, restaurantId: req.params.id });
+    if (!item) return res.status(404).json(fail("ITEM_NOT_FOUND", "Menu item not found"));
+
+    const before = item.toObject();
+    const updated = await updateFoodItem(item, req.body ?? {});
+    await audit(req, "menu_item.edit", "food_item", req.params.itemId, before, updated.toObject());
+    res.json(ok({ item: toFoodItemDTO(updated.toObject()) }, "Menu item updated"));
+  } catch (e) {
+    if (e instanceof MenuItemError) return res.status(e.status).json(fail(e.code, e.message));
+    res.status(500).json(fail("MENU_ITEM_UPDATE_FAILED", e instanceof Error ? e.message : "Could not update menu item"));
+  }
+});
+
+adminRouter.delete("/restaurants/:id/menu/:itemId", async (req: AuthedRequest, res) => {
+  try {
+    const item = await FoodItem.findOneAndDelete({ _id: req.params.itemId, restaurantId: req.params.id });
+    if (!item) return res.status(404).json(fail("ITEM_NOT_FOUND", "Menu item not found"));
+    await audit(req, "menu_item.delete", "food_item", req.params.itemId, { name: item.name }, null);
+    res.json(ok({ deleted: true }, "Menu item removed"));
+  } catch (e) {
+    res.status(500).json(fail("MENU_ITEM_DELETE_FAILED", e instanceof Error ? e.message : "Could not remove this menu item"));
+  }
+});
+
+// --- Legacy multi-service products (Grocery/Mart/Vegetables) --------------
+// Distinct from FoodItem above — see models.ts's note on the two catalog
+// shapes. The portal's own /api/goocart previously could only adjust stock
+// on products a seed script created; admin can now create/edit/delete them
+// directly like any other catalog entry.
+
+const productDTO = (p: any) => ({
+  id: String(p._id),
+  service: p.service,
+  vendorId: p.vendorId ? String(p.vendorId) : null,
+  vendorName: p.vendorName,
+  name: p.name,
+  description: p.description,
+  price: p.price,
+  stock: p.stock,
+  rating: p.rating,
+  eta: p.eta,
+});
+
+adminRouter.get("/products", async (req, res) => {
+  try {
+    const filter: Record<string, unknown> = {};
+    if (req.query.service) filter.service = String(req.query.service);
+    const products = await Product.find(filter).sort({ name: 1 }).lean();
+    res.json(ok({ products: products.map(productDTO) }));
+  } catch (e) {
+    res.status(500).json(fail("PRODUCTS_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load products"));
+  }
+});
+
+adminRouter.post("/products", async (req: AuthedRequest, res) => {
+  try {
+    const body = req.body ?? {};
+    const name = String(body.name ?? "").trim();
+    const service = String(body.service ?? "");
+    const price = Number(body.price);
+
+    if (name.length < 2) return res.status(400).json(fail("INVALID_NAME", "Enter a product name."));
+    if (!["Grocery", "Vegetables", "Mart"].includes(service)) return res.status(400).json(fail("INVALID_SERVICE", "Service must be Grocery, Vegetables or Mart."));
+    if (!Number.isFinite(price) || price <= 0) return res.status(400).json(fail("INVALID_PRICE", "Enter a valid price."));
+
+    // Admin acts as the vendor of record for these platform-run catalogs —
+    // there is no separate vendor-app login for this legacy service line.
+    const product = await Product.create({
+      service,
+      vendorId: req.user!._id,
+      vendorName: body.vendorName || "Goocart",
+      name,
+      description: body.description ?? "",
+      price,
+      stock: Number(body.stock) || 0,
+      eta: body.eta || "30–45 min",
+    });
+
+    await audit(req, "product.create", "product", String(product._id), null, { name, service });
+    res.json(ok({ product: productDTO(product.toObject()) }, "Product created"));
+  } catch (e) {
+    res.status(500).json(fail("PRODUCT_CREATE_FAILED", e instanceof Error ? e.message : "Could not create product"));
+  }
+});
+
+adminRouter.patch("/products/:id", async (req: AuthedRequest, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json(fail("PRODUCT_NOT_FOUND", "Product not found"));
+
+    const before = product.toObject();
+    const body = req.body ?? {};
+    if (body.name !== undefined) product.name = String(body.name).trim();
+    if (body.description !== undefined) product.description = String(body.description);
+    if (body.price !== undefined) {
+      const price = Number(body.price);
+      if (!Number.isFinite(price) || price <= 0) return res.status(400).json(fail("INVALID_PRICE", "Enter a valid price."));
+      product.price = price;
+    }
+    if (body.stock !== undefined) {
+      const stock = Number(body.stock);
+      if (!Number.isFinite(stock) || stock < 0) return res.status(400).json(fail("INVALID_STOCK", "Stock cannot be negative."));
+      product.stock = stock;
+    }
+    if (body.eta !== undefined) product.eta = String(body.eta);
+
+    await product.save();
+    await audit(req, "product.edit", "product", req.params.id, before, product.toObject());
+    res.json(ok({ product: productDTO(product.toObject()) }, "Product updated"));
+  } catch (e) {
+    res.status(500).json(fail("PRODUCT_UPDATE_FAILED", e instanceof Error ? e.message : "Could not update product"));
+  }
+});
+
+adminRouter.delete("/products/:id", async (req: AuthedRequest, res) => {
+  try {
+    const product = await Product.findByIdAndDelete(req.params.id);
+    if (!product) return res.status(404).json(fail("PRODUCT_NOT_FOUND", "Product not found"));
+    await audit(req, "product.delete", "product", req.params.id, { name: product.name }, null);
+    res.json(ok({ deleted: true }, "Product deleted"));
+  } catch (e) {
+    res.status(500).json(fail("PRODUCT_DELETE_FAILED", e instanceof Error ? e.message : "Could not delete product"));
   }
 });

@@ -87,8 +87,45 @@ function Kpis({items}:{items:[string,string,string][]}){return <section classNam
 function OrdersTable({orders,act,busy}:{orders:Order[];act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){return <div className="ops-table"><div className="ops-row ops-head"><span>REFERENCE</span><span>DETAILS</span><span>STATUS</span><span>VALUE</span><span>ACTION</span></div>{orders.map((o)=><div className="ops-row" key={o.id}><b>{o.reference}</b><span>{o.vendor}<small>{o.service} • {orderSummary(o)}</small></span><Status value={o.status}/><strong>{money(o.total)}</strong><OrderAction order={o} act={act} busy={busy}/></div>)}{!orders.length&&<Empty title="No matching work" copy="New activity will appear here automatically."/>}</div>}
 function OrderAction({order,act,busy}:{order:Order;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){if(terminalStatuses.includes(order.status))return null;return <div className="row-actions"><button className="danger" disabled={busy} onClick={()=>void act({action:"order.transition",id:order.id,to:"CANCELLED_BY_ADMIN"})}>Cancel</button></div>}
 
-function Admin({state,act,busy}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){const [page,setPage]=useState("Dashboard");const orders=state.orders;const gmv=orders.reduce((s,x)=>s+x.total,0);const active=orders.filter((x)=>!terminalStatuses.includes(x.status));const rides=orders.filter((x)=>x.service==="Bike Taxi");const parcels=orders.filter((x)=>x.service==="Parcel");return <Shell page={page} setPage={setPage} state={state}>{page==="Dashboard"&&<><div className="overview"><span><small>Command center</small><h2>Operations at a glance.</h2></span><b>LIVE DATA</b></div><Kpis items={[[money(gmv),"Total GMV","All services"],[String(orders.length),"Total orders & jobs","Live"],[String(active.length),"Active operations","Now"],[String(state.services.filter((x)=>x.enabled).length),"Enabled services","of 6"]]}/><section className="panel"><div><span><h2>Live operations</h2><small>Customer, vendor and partner activity</small></span></div><OrdersTable orders={active.slice(0,7)} act={act} busy={busy}/></section></>}{page==="Live Orders"&&<AdminLiveOrders/>}{["Live Operations","Orders"].includes(page)&&<WorkspacePage eyebrow="REALTIME OPERATIONS" title={page} copy="Monitor status and intervene when necessary."><OrdersTable orders={page==="Orders"?orders:active} act={act} busy={busy}/></WorkspacePage>}{page==="Rides"&&<WorkspacePage eyebrow="RIDE ENGINE" title="Bike taxi" copy="Ride requests, driver assignments and completions."><OrdersTable orders={rides} act={act} busy={busy}/></WorkspacePage>}{page==="Parcels"&&<WorkspacePage eyebrow="PARCEL ENGINE" title="Parcel operations" copy="Pickup, transit and delivery verification."><OrdersTable orders={parcels} act={act} busy={busy}/></WorkspacePage>}{page==="Catalog"&&<AdminCatalog state={state} act={act} busy={busy}/>} {page==="Discounts & Pricing"&&<AdminDiscounts/>} {page==="Settings"&&<AdminSettings state={state} act={act}/>} {page==="Finance"&&<StatsPage title="Platform finance" stats={[["Gross merchandise value",money(gmv)],["Platform revenue",money(gmv*.18)],["Vendor payable",money(gmv*.82)]]}/>} {page==="Vendors"&&<AdminVendors/>} {page==="Delivery Partners"&&<AdminPartners/>} {page==="Customers"&&<AdminCustomers/>} {page==="Support"&&<Directory title="Support tickets" rows={[["#TKT-1042","Order delayed","Open"],["#TKT-1039","Payment issue","In progress"],["#TKT-1034","Missing item","Resolved"]]}/>} {page==="Reports"&&<StatsPage title="Performance reports" stats={commerce.map((x)=>[x,`${orders.filter((o)=>o.service===x).length} orders`])}/>}</Shell>}
-function AdminCatalog({state,act,busy}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){return <WorkspacePage eyebrow="CATALOG & INVENTORY" title="All products" copy="Live price, stock and service availability."><div className="inventory-list">{state.products.map((p)=><article key={p.id}><i>{p.name[0]}</i><span><small>{p.service} • {p.vendor}</small><h3>{p.name}</h3><p>{money(p.price)} • ★ {p.rating}</p></span><b className={p.stock<15?"low-stock":""}>{p.stock} stock</b><div className="qty"><button disabled={busy} onClick={()=>void act({action:"stock.adjust",id:p.id,amount:-1})}>−</button><button disabled={busy} onClick={()=>void act({action:"stock.adjust",id:p.id,amount:5})}>+5</button></div></article>)}</div></WorkspacePage>}
+function Admin({state,act,busy,retry}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean;retry:()=>Promise<void>}){const [page,setPage]=useState("Dashboard");const orders=state.orders;const gmv=orders.reduce((s,x)=>s+x.total,0);const active=orders.filter((x)=>!terminalStatuses.includes(x.status));const rides=orders.filter((x)=>x.service==="Bike Taxi");const parcels=orders.filter((x)=>x.service==="Parcel");return <Shell page={page} setPage={setPage} state={state}>{page==="Dashboard"&&<><div className="overview"><span><small>Command center</small><h2>Operations at a glance.</h2></span><b>LIVE DATA</b></div><Kpis items={[[money(gmv),"Total GMV","All services"],[String(orders.length),"Total orders & jobs","Live"],[String(active.length),"Active operations","Now"],[String(state.services.filter((x)=>x.enabled).length),"Enabled services","of 6"]]}/><section className="panel"><div><span><h2>Live operations</h2><small>Customer, vendor and partner activity</small></span></div><OrdersTable orders={active.slice(0,7)} act={act} busy={busy}/></section></>}{page==="Live Orders"&&<AdminLiveOrders/>}{["Live Operations","Orders"].includes(page)&&<WorkspacePage eyebrow="REALTIME OPERATIONS" title={page} copy="Monitor status and intervene when necessary."><OrdersTable orders={page==="Orders"?orders:active} act={act} busy={busy}/></WorkspacePage>}{page==="Rides"&&<WorkspacePage eyebrow="RIDE ENGINE" title="Bike taxi" copy="Ride requests, driver assignments and completions."><OrdersTable orders={rides} act={act} busy={busy}/></WorkspacePage>}{page==="Parcels"&&<WorkspacePage eyebrow="PARCEL ENGINE" title="Parcel operations" copy="Pickup, transit and delivery verification."><OrdersTable orders={parcels} act={act} busy={busy}/></WorkspacePage>}{page==="Catalog"&&<AdminCatalog state={state} act={act} busy={busy} retry={retry}/>} {page==="Discounts & Pricing"&&<AdminDiscounts/>} {page==="Settings"&&<AdminSettings state={state} act={act}/>} {page==="Finance"&&<StatsPage title="Platform finance" stats={[["Gross merchandise value",money(gmv)],["Platform revenue",money(gmv*.18)],["Vendor payable",money(gmv*.82)]]}/>} {page==="Vendors"&&<AdminVendors/>} {page==="Delivery Partners"&&<AdminPartners/>} {page==="Customers"&&<AdminCustomers/>} {page==="Support"&&<Directory title="Support tickets" rows={[["#TKT-1042","Order delayed","Open"],["#TKT-1039","Payment issue","In progress"],["#TKT-1034","Missing item","Resolved"]]}/>} {page==="Reports"&&<StatsPage title="Performance reports" stats={commerce.map((x)=>[x,`${orders.filter((o)=>o.service===x).length} orders`])}/>}</Shell>}
+function AdminCatalog({state,act,busy,retry}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean;retry:()=>Promise<void>}){
+  const [showCreate,setShowCreate]=useState(false);
+  const [error,setError]=useState("");
+  const remove=async(id:string)=>{if(!confirm("Delete this product?"))return;try{await adminApi(`/products/${id}`,{method:"DELETE"});await retry();}catch(e){setError(e instanceof Error?e.message:"Could not delete this product");}};
+  return <WorkspacePage eyebrow="CATALOG & INVENTORY" title="All products" copy="Grocery, Vegetables and Mart items — create new ones, adjust stock, or remove them.">
+    {error&&<p className="auth-error">{error}</p>}
+    <PrimaryActionButton label={showCreate?"Cancel":"+ Create Product"} onClick={()=>setShowCreate(!showCreate)}/>
+    {showCreate&&<CreateProductForm onCreated={()=>{setShowCreate(false);void retry();}}/>}
+    <div className="inventory-list">{state.products.map((p)=><article key={p.id}><i>{p.name[0]}</i><span><small>{p.service} • {p.vendor}</small><h3>{p.name}</h3><p>{money(p.price)} • ★ {p.rating}</p></span><b className={p.stock<15?"low-stock":""}>{p.stock} stock</b><div className="qty"><button disabled={busy} onClick={()=>void act({action:"stock.adjust",id:p.id,amount:-1})}>−</button><button disabled={busy} onClick={()=>void act({action:"stock.adjust",id:p.id,amount:5})}>+5</button></div><button className="secondary danger-text" onClick={()=>void remove(p.id)}>Delete</button></article>)}</div>
+  </WorkspacePage>;
+}
+
+function CreateProductForm({onCreated}:{onCreated:()=>void}){
+  const [form,setForm]=useState({service:"Grocery",name:"",description:"",price:"",stock:"0"});
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
+    try{
+      await adminApi("/products",{method:"POST",body:JSON.stringify({service:form.service,name:form.name,description:form.description,price:Number(form.price),stock:Number(form.stock)})});
+      onCreated();
+    }catch(e){setError(e instanceof Error?e.message:"Could not create this product");}finally{setBusy(false);}
+  };
+  return <form className="auth-form inline-form" onSubmit={(e)=>void submit(e)}>
+    <label>Service
+      <select value={form.service} onChange={(e)=>setForm({...form,service:e.target.value})}>
+        <option value="Grocery">Grocery</option>
+        <option value="Vegetables">Vegetables</option>
+        <option value="Mart">Mart</option>
+      </select>
+    </label>
+    <label>Product name<input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></label>
+    <label>Description (optional)<input value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label>
+    <label>Price (₹)<input required type="number" min="1" value={form.price} onChange={(e)=>setForm({...form,price:e.target.value})}/></label>
+    <label>Stock<input type="number" min="0" value={form.stock} onChange={(e)=>setForm({...form,stock:e.target.value})}/></label>
+    {error&&<p className="auth-error">{error}</p>}
+    <button className="primary" disabled={busy}>{busy?"Creating…":"Create product"}</button>
+  </form>;
+}
 function AdminSettings({state,act}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>}){return <WorkspacePage eyebrow="SERVICE AREA" title="Jangareddigudem" copy="Enable services independently for this operating area."><div className="setting-list">{state.services.map((s)=><article key={s.service}><i>{s.service[0]}</i><span><b>{s.service}</b><small>{s.enabled?"Available to customers":"Temporarily unavailable"}</small></span><button className={s.enabled?"toggle on":"toggle"} onClick={()=>void act({action:"service.toggle",service:s.service,enabled:!s.enabled})}><i/></button></article>)}</div></WorkspacePage>}
 
 type AdminRestaurant = { id:string; name:string; area:string; isOpen:boolean; status:string; manualOrderAcceptance:boolean; owner:{id:string;name:string;email:string}|null; offers:{id:string;title:string;description:string|null}[] };
@@ -106,6 +143,7 @@ function AdminVendors(){
   const [showCreate,setShowCreate]=useState(false);
   const [expanded,setExpanded]=useState<string|null>(null);
   const [expandedOffers,setExpandedOffers]=useState<string|null>(null);
+  const [expandedMenu,setExpandedMenu]=useState<string|null>(null);
   const load=useCallback(async()=>{try{const [r,v]=await Promise.all([adminApi<{restaurants:AdminRestaurant[]}>("/restaurants"),adminApi<{vendors:AdminVendorUser[]}>("/vendors")]);setRestaurants(r.restaurants);setVendors(v.vendors);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load vendors");}},[]);
   useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
   const assign=async(restaurantId:string,userId:string)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/owner`,{method:"PATCH",body:JSON.stringify({userId:userId||null})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not assign owner");}finally{setBusy(false);}};
@@ -132,9 +170,11 @@ function AdminVendors(){
         </select>
         <button className="secondary" onClick={()=>setExpanded(expanded===r.id?null:r.id)}>{expanded===r.id?"Hide team":"Manage team"}</button>
         <button className="secondary" onClick={()=>setExpandedOffers(expandedOffers===r.id?null:r.id)}>{expandedOffers===r.id?"Hide offers":`Manage offers (${r.offers.length})`}</button>
+        <button className="secondary" onClick={()=>setExpandedMenu(expandedMenu===r.id?null:r.id)}>{expandedMenu===r.id?"Hide menu":"Manage menu"}</button>
       </div>
       {expanded===r.id&&<VendorTeamPanel restaurantId={r.id}/>}
       {expandedOffers===r.id&&<VendorOffersPanel restaurantId={r.id} offers={r.offers} onChange={load}/>}
+      {expandedMenu===r.id&&<VendorMenuPanel restaurantId={r.id}/>}
     </article>)}</div>}
   </WorkspacePage>;
 }
@@ -270,6 +310,58 @@ function VendorOffersPanel({restaurantId,offers,onChange}:{restaurantId:string;o
       <button className="primary" disabled={busy}>{busy?"Adding…":"Add offer"}</button>
     </form>}
   </div>;
+}
+
+type AdminMenuItem = { id:string; name:string; description:string; price:number; veg:boolean; available:boolean; categoryId:string };
+
+function VendorMenuPanel({restaurantId}:{restaurantId:string}){
+  const [items,setItems]=useState<AdminMenuItem[]|null>(null);
+  const [showAdd,setShowAdd]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const load=useCallback(async()=>{try{const r=await adminApi<{items:AdminMenuItem[]}>(`/restaurants/${restaurantId}/menu`);setItems(r.items);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load this restaurant's menu");}},[restaurantId]);
+  useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
+
+  const toggleAvailable=async(item:AdminMenuItem)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/menu/${item.id}`,{method:"PATCH",body:JSON.stringify({available:!item.available})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update this item");}finally{setBusy(false);}};
+  const remove=async(item:AdminMenuItem)=>{if(!confirm(`Delete "${item.name}"?`))return;setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/menu/${item.id}`,{method:"DELETE"});await load();}catch(e){setError(e instanceof Error?e.message:"Could not delete this item");}finally{setBusy(false);}};
+
+  return <div className="team-panel">
+    {error&&<p className="auth-error">{error}</p>}
+    {items===null?<p className="muted-note">Loading menu…</p>:!items.length?<p className="muted-note">No menu items yet.</p>:
+      <div className="team-list">{items.map((item)=><div key={item.id} className="team-member">
+        <div className="team-member-head">
+          <b>{item.name}</b><small>{item.veg?"Veg":"Non-veg"} • ₹{item.price}{item.description?` • ${item.description}`:""}</small>
+          <span className={`status status-${item.available?"active":"suspended"}`}>● {item.available?"Available":"Unavailable"}</span>
+        </div>
+        <div className="team-member-actions">
+          <button className="secondary" disabled={busy} onClick={()=>void toggleAvailable(item)}>{item.available?"Mark unavailable":"Mark available"}</button>
+          <button className="secondary danger-text" disabled={busy} onClick={()=>void remove(item)}>Delete</button>
+        </div>
+      </div>)}</div>}
+    <PrimaryActionButton label={showAdd?"Cancel":"+ Add Menu Item"} onClick={()=>setShowAdd(!showAdd)}/>
+    {showAdd&&<AddMenuItemForm restaurantId={restaurantId} onCreated={()=>{setShowAdd(false);void load();}}/>}
+  </div>;
+}
+
+function AddMenuItemForm({restaurantId,onCreated}:{restaurantId:string;onCreated:()=>void}){
+  const [form,setForm]=useState({name:"",description:"",price:"",categoryKey:"mains",veg:true});
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
+    try{
+      await adminApi(`/restaurants/${restaurantId}/menu`,{method:"POST",body:JSON.stringify({name:form.name,description:form.description,price:Number(form.price),categoryKey:form.categoryKey,veg:form.veg})});
+      onCreated();
+    }catch(e){setError(e instanceof Error?e.message:"Could not add this menu item");}finally{setBusy(false);}
+  };
+  return <form className="auth-form inline-form" onSubmit={(e)=>void submit(e)}>
+    <label>Dish name<input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></label>
+    <label>Description (optional)<input value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label>
+    <label>Price (₹)<input required type="number" min="1" value={form.price} onChange={(e)=>setForm({...form,price:e.target.value})}/></label>
+    <label>Category key (e.g. mains, starters)<input required value={form.categoryKey} onChange={(e)=>setForm({...form,categoryKey:e.target.value})}/></label>
+    <label className="checkbox-label"><input type="checkbox" checked={form.veg} onChange={(e)=>setForm({...form,veg:e.target.checked})}/>Vegetarian</label>
+    {error&&<p className="auth-error">{error}</p>}
+    <button className="primary" disabled={busy}>{busy?"Adding…":"Add menu item"}</button>
+  </form>;
 }
 
 type AdminCustomerRow = { id:string; name:string; email:string; phone:string|null; status:string; joinedAt:string; orders:number; completedOrders:number; cancelledOrders:number; totalSpend:number; lastOrderAt:string|null };
@@ -525,4 +617,4 @@ function roleGuidance(role:string):string{
   return "This account isn't set up for the Goocart Admin console.";
 }
 
-export default function Home(){const {state,busy,toast,error,act,retry}=useGoocart();if(error?.code==="AUTH_REQUIRED")return <AuthGate onAuthenticated={()=>void retry()}/>;if(error)return <main className="fatal"><Brand/><h1>Goocart couldn’t start</h1><p>{error.message}</p><button onClick={()=>void retry()}>Try again</button></main>;if(!state)return <main className="loading"><Brand/><div className="loader"/><p>Starting Goocart...</p></main>;const content=state.actor.role.includes("ADMIN")?<Admin state={state} act={act} busy={busy}/>:<main className="fatal"><Brand/><h1>This is the Admin console</h1><p>{roleGuidance(state.actor.role)}</p><button onClick={()=>void logout()}>Sign out</button></main>;return <div>{busy&&<div className="syncing">Syncing…</div>}{toast&&<div className="toast">{toast}</div>}{content}</div>}
+export default function Home(){const {state,busy,toast,error,act,retry}=useGoocart();if(error?.code==="AUTH_REQUIRED")return <AuthGate onAuthenticated={()=>void retry()}/>;if(error)return <main className="fatal"><Brand/><h1>Goocart couldn’t start</h1><p>{error.message}</p><button onClick={()=>void retry()}>Try again</button></main>;if(!state)return <main className="loading"><Brand/><div className="loader"/><p>Starting Goocart...</p></main>;const content=state.actor.role.includes("ADMIN")?<Admin state={state} act={act} busy={busy} retry={retry}/>:<main className="fatal"><Brand/><h1>This is the Admin console</h1><p>{roleGuidance(state.actor.role)}</p><button onClick={()=>void logout()}>Sign out</button></main>;return <div>{busy&&<div className="syncing">Syncing…</div>}{toast&&<div className="toast">{toast}</div>}{content}</div>}
