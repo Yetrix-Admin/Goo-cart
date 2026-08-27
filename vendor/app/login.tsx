@@ -8,37 +8,78 @@ import { colors, radius, spacing, typography } from "@/theme";
 import { useAuthStore } from "@/store/useAuthStore";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^\+?[0-9]{7,15}$/;
 
+type Mode = "otp" | "password";
+type Step = "identify" | "verify";
+
+// There is deliberately no self-signup here: only an admin creates Vendor
+// App logins (spec section 11-13). A vendor user's login is the OTP sent to
+// whatever email/phone the admin registered for them; password sign-in is
+// kept only for the small number of pre-existing owner accounts that were
+// created with one before this app supported OTP.
 export default function LoginScreen() {
-  const [mode, setMode] = useState<"login" | "signup">("login");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState<Mode>("otp");
+  const [step, setStep] = useState<Step>("identify");
+  const [identifier, setIdentifier] = useState("");
+  const [code, setCode] = useState("");
+  const [hint, setHint] = useState("");
+
+  const [pwEmail, setPwEmail] = useState("");
+  const [pwPassword, setPwPassword] = useState("");
+
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const requestOtp = useAuthStore((s) => s.requestOtp);
+  const verifyOtp = useAuthStore((s) => s.verifyOtp);
   const signIn = useAuthStore((s) => s.signIn);
-  const signUp = useAuthStore((s) => s.signUp);
 
-  const submit = async () => {
+  const submitIdentifier = async () => {
     setError("");
-    if (!EMAIL_RE.test(email.trim())) {
-      setError("Enter a valid email address.");
+    const trimmed = identifier.trim();
+    if (!EMAIL_RE.test(trimmed) && !PHONE_RE.test(trimmed)) {
+      setError("Enter the email or mobile number your admin registered for you.");
       return;
     }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
-    if (mode === "signup" && name.trim().length < 2) {
-      setError("Enter your full name.");
-      return;
-    }
-
     setBusy(true);
     try {
-      if (mode === "signup") await signUp(email.trim(), password, name.trim());
-      else await signIn(email.trim(), password);
+      const result = await requestOtp(trimmed);
+      setHint(result.message);
+      setStep("verify");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not send a code. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitCode = async () => {
+    setError("");
+    if (!/^[0-9]{6}$/.test(code.trim())) {
+      setError("Enter the 6-digit code.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await verifyOtp(identifier.trim(), code.trim());
+      router.replace("/(tabs)/home");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That code is incorrect or has expired.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitPassword = async () => {
+    setError("");
+    if (!EMAIL_RE.test(pwEmail.trim()) || !pwPassword) {
+      setError("Enter your email and password.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await signIn(pwEmail.trim(), pwPassword);
       router.replace("/(tabs)/home");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
@@ -54,31 +95,39 @@ export default function LoginScreen() {
           <Brand size={32} />
 
           <View style={styles.hero}>
-            <Text style={typography.h1}>{mode === "signup" ? "Join as a vendor" : "Welcome back"}</Text>
-            <Text style={styles.copy}>Sign in with the restaurant account your admin set up for you.</Text>
+            <Text style={typography.h1}>Vendor sign in</Text>
+            <Text style={styles.copy}>Sign in with the account your admin set up for you.</Text>
           </View>
 
-          {mode === "signup" ? (
-            <Field label="Full name" value={name} onChangeText={setName} autoCapitalize="words" />
-          ) : null}
+          {mode === "otp" ? (
+            step === "identify" ? (
+              <>
+                <Field label="Email or mobile number" value={identifier} onChangeText={setIdentifier} autoCapitalize="none" />
+                {error ? <Text style={styles.error}>{error}</Text> : null}
+                <PrimaryButton label={busy ? "Please wait…" : "Send code"} onPress={() => void submitIdentifier()} disabled={busy} />
+              </>
+            ) : (
+              <>
+                {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+                <Field label="6-digit code" value={code} onChangeText={setCode} keyboardType="number-pad" maxLength={6} />
+                {error ? <Text style={styles.error}>{error}</Text> : null}
+                <PrimaryButton label={busy ? "Verifying…" : "Verify & continue"} onPress={() => void submitCode()} disabled={busy} />
+                <Pressable style={styles.switch} onPress={() => { setStep("identify"); setCode(""); setError(""); }}>
+                  <Text style={styles.switchText}>Use a different email or number</Text>
+                </Pressable>
+              </>
+            )
+          ) : (
+            <>
+              <Field label="Email" value={pwEmail} onChangeText={setPwEmail} keyboardType="email-address" autoCapitalize="none" />
+              <Field label="Password" value={pwPassword} onChangeText={setPwPassword} secureTextEntry />
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+              <PrimaryButton label={busy ? "Please wait…" : "Sign in"} onPress={() => void submitPassword()} disabled={busy} />
+            </>
+          )}
 
-          <Field label="Email" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
-          <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry />
-
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          <PrimaryButton label={busy ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"} onPress={() => void submit()} disabled={busy} />
-
-          <Pressable
-            onPress={() => {
-              setMode(mode === "signup" ? "login" : "signup");
-              setError("");
-            }}
-            style={styles.switch}
-          >
-            <Text style={styles.switchText}>
-              {mode === "signup" ? "Already a vendor? Sign in" : "New vendor? Create an account"}
-            </Text>
+          <Pressable style={styles.switch} onPress={() => { setMode(mode === "otp" ? "password" : "otp"); setStep("identify"); setError(""); }}>
+            <Text style={styles.switchText}>{mode === "otp" ? "Have a password instead? Sign in with it" : "Use OTP instead"}</Text>
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -115,6 +164,7 @@ const styles = StyleSheet.create({
     ...typography.body,
   },
   error: { ...typography.caption, color: colors.error },
+  hint: { ...typography.caption, color: colors.muted },
   switch: { alignItems: "center", paddingVertical: spacing.sm },
   switchText: { ...typography.captionStrong, color: colors.primary },
 });

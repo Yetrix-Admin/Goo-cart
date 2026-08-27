@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Linking, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -8,13 +8,16 @@ import { EmptyState } from "@/components/EmptyState";
 import { Icon } from "@/components/Icon";
 import { colors, radius, spacing, typography } from "@/theme";
 import { useOrdersStore } from "@/store/useOrdersStore";
+import { apiPost } from "@/services/apiClient";
 import { FoodOrderStatus } from "@/types";
 
 const POLL_INTERVAL_MS = 5000;
 
 // What this partner can do at each stage, and what the next stage is called.
 const NEXT_STEP: Partial<Record<FoodOrderStatus, { to: FoodOrderStatus; label: string }>> = {
-  DELIVERY_PARTNER_ASSIGNED: { to: "PICKED_UP", label: "Mark picked up" },
+  DELIVERY_PARTNER_ASSIGNED: { to: "GOING_TO_VENDOR", label: "Heading to restaurant" },
+  GOING_TO_VENDOR: { to: "ARRIVED_AT_VENDOR", label: "I've reached the restaurant" },
+  ARRIVED_AT_VENDOR: { to: "PICKED_UP", label: "Mark picked up" },
   PICKED_UP: { to: "ON_THE_WAY", label: "Start delivery" },
   ON_THE_WAY: { to: "ARRIVED", label: "I've arrived" },
 };
@@ -60,6 +63,24 @@ export default function TaskDetailScreen() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const release = () => {
+    Alert.alert("Can't complete this delivery?", "This releases the job so another delivery partner can take it. Only do this if you genuinely cannot finish it.", [
+      { text: "Never mind", style: "cancel" },
+      {
+        text: "Release job",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await apiPost("/api/v1/partner/active-delivery/release", { reason: "PARTNER_UNABLE_TO_COMPLETE" });
+            router.replace("/(tabs)/home");
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "Could not release this job");
+          }
+        },
+      },
+    ]);
   };
 
   const complete = async () => {
@@ -177,6 +198,10 @@ export default function TaskDetailScreen() {
                 <PrimaryButton label={busy ? "Please wait…" : next.label} onPress={() => void advance(next.to)} disabled={busy} />
               </>
             ) : null}
+
+            <Pressable style={styles.releaseLink} onPress={release}>
+              <Text style={styles.releaseLinkText}>Can't complete this delivery?</Text>
+            </Pressable>
           </>
         )}
       </ScrollView>
@@ -207,4 +232,6 @@ const styles = StyleSheet.create({
   },
   error: { ...typography.caption, color: colors.error },
   doneCard: { alignItems: "center", gap: spacing.sm, paddingVertical: spacing.xxxl },
+  releaseLink: { alignItems: "center", paddingVertical: spacing.sm },
+  releaseLinkText: { ...typography.caption, color: colors.muted, textDecorationLine: "underline" },
 });

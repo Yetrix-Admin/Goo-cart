@@ -3,6 +3,7 @@ export type PartnerUser = {
   name: string;
   email: string;
   role: string;
+  partnerApprovalStatus: "PENDING" | "APPROVED" | "REJECTED";
 };
 
 // --- Orders (shapes mirror the /api/v1/orders DTOs in server/src/routes/orders.ts) --
@@ -59,6 +60,8 @@ export const ORDER_STATUSES = [
   "PREPARING",
   "READY_FOR_PICKUP",
   "DELIVERY_PARTNER_ASSIGNED",
+  "GOING_TO_VENDOR",
+  "ARRIVED_AT_VENDOR",
   "PICKED_UP",
   "ON_THE_WAY",
   "ARRIVED",

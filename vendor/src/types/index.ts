@@ -3,7 +3,32 @@ export type VendorUser = {
   name: string;
   email: string;
   role: string;
+  vendorId: string | null;
+  permissions: string[];
+  staffTitle: string | null;
 };
+
+export const VENDOR_PERMISSIONS = [
+  "CAN_VIEW_ORDERS",
+  "CAN_ACCEPT_ORDER",
+  "CAN_REJECT_ORDER",
+  "CAN_UPDATE_ORDER_STATUS",
+  "CAN_MARK_READY",
+  "CAN_MANAGE_PRODUCTS",
+  "CAN_MANAGE_STOCK",
+  "CAN_MANAGE_PRICES",
+  "CAN_MANAGE_OFFERS",
+  "CAN_VIEW_REPORTS",
+  "CAN_MANAGE_VENDOR_USERS",
+] as const;
+export type VendorPermission = (typeof VENDOR_PERMISSIONS)[number];
+
+/** VENDOR_OWNER implicitly has every permission — mirrors hasVendorPermission() server-side. */
+export function hasPermission(user: Pick<VendorUser, "role" | "permissions"> | null, permission: VendorPermission): boolean {
+  if (!user) return false;
+  if (user.role === "VENDOR_OWNER") return true;
+  return user.permissions.includes(permission);
+}
 
 // --- Restaurant / menu (shapes mirror server/src/routes/catalog.ts's DTOs, --
 // --- the same ones the mobile Customer app reads) ---------------------------
@@ -99,6 +124,8 @@ export const ORDER_STATUSES = [
   "PREPARING",
   "READY_FOR_PICKUP",
   "DELIVERY_PARTNER_ASSIGNED",
+  "GOING_TO_VENDOR",
+  "ARRIVED_AT_VENDOR",
   "PICKED_UP",
   "ON_THE_WAY",
   "ARRIVED",
@@ -136,4 +163,7 @@ export type FoodOrder = {
   estimatedDeliveryMinutes: number;
   statusHistory: OrderStatusEvent[];
   deliveryPartner: { id: string; name: string | null } | null;
+  manualAcceptanceRequired: boolean;
+  autoAccepted: boolean;
+  deliveryOfferStatus: "NONE" | "OFFERING" | "ASSIGNED" | "EXPIRED";
 };

@@ -18,7 +18,20 @@ import { ok, fail, EMAIL_RE, PHONE_RE } from "../lib/http.js";
 
 export const authRouter = Router();
 
-const publicUser = (u: any) => ({ id: String(u._id), email: u.email, phone: u.phone ?? null, name: u.name, role: u.role, status: u.status });
+const publicUser = (u: any) => ({
+  id: String(u._id),
+  email: u.email,
+  phone: u.phone ?? null,
+  name: u.name,
+  role: u.role,
+  status: u.status,
+  // Only meaningful for Vendor App / Delivery Partner App logins; harmless
+  // (and ignored) for a Customer App session.
+  vendorId: u.vendorId ? String(u.vendorId) : null,
+  vendorPermissions: u.vendorPermissions ?? [],
+  staffTitle: u.staffTitle ?? null,
+  partnerApprovalStatus: u.partnerApprovalStatus ?? null,
+});
 
 async function handleSignup(req: Request, res: Response) {
   try {

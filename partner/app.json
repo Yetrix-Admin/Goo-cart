@@ -10,7 +10,10 @@
     "backgroundColor": "#FAFAFA",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.goocart.partner"
+      "bundleIdentifier": "com.goocart.partner",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Goocart Partner shares your live location with the customer and admin while you have an active delivery, so they can track your progress."
+      }
     },
     "android": {
       "package": "com.goocart.partner",
@@ -23,7 +26,9 @@
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "INTERNET"
+        "INTERNET",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
       ]
     },
     "web": {
@@ -41,6 +46,13 @@
         }
       ],
       "expo-font",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Goocart Partner shares your live location with the customer and admin while you have an active delivery."
+        }
+      ],
+      "expo-notifications",
       [
         "expo-build-properties",
         {
