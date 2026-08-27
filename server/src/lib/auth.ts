@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { Request, Response, NextFunction } from "express";
 import { Otp, Session, User, type UserDoc } from "../models.js";
+import { otpEmail, sendEmail } from "./email.js";
 
 const SESSION_TTL_DAYS = 30;
 const OTP_TTL_MINUTES = 5;
@@ -60,7 +61,9 @@ export async function userFromToken(token: string): Promise<UserDoc | null> {
 
 // --- OTP ------------------------------------------------------------------
 
-export async function issueOtp(identifier: string, purpose: string): Promise<string> {
+export type OtpIssueResult = { delivered: boolean; reason?: string };
+
+export async function issueOtp(identifier: string, purpose: string): Promise<OtpIssueResult> {
   const recent = await Otp.countDocuments({ identifier, purpose, createdAt: { $gt: new Date(Date.now() - 10 * 60_000) } });
   if (recent >= 5) throw new Error("Too many codes requested. Try again later.");
 
@@ -71,10 +74,17 @@ export async function issueOtp(identifier: string, purpose: string): Promise<str
     codeHash: sha256(code),
     expiresAt: new Date(Date.now() + OTP_TTL_MINUTES * 60_000),
   });
-  // No SMS/email provider is configured; the code is logged so development
-  // flows work. This is a labelled dev fallback, never a claim of delivery.
-  console.log(`[DEV OTP] ${identifier} -> ${code}`);
-  return code;
+  // Phone delivery has no provider yet; only email codes actually go out.
+  const isEmail = identifier.includes("@");
+  if (!isEmail) {
+    console.log(`[DEV OTP — no SMS provider] ${identifier} -> ${code}`);
+    return { delivered: false, reason: "SMS delivery is not configured yet" };
+  }
+
+  const { subject, html, text } = otpEmail(code);
+  const result = await sendEmail(identifier, subject, html, text);
+  if (!result.delivered) console.log(`[DEV OTP — email not delivered] ${identifier} -> ${code}`);
+  return result;
 }
 
 export async function consumeOtp(identifier: string, purpose: string, code: string): Promise<boolean> {

@@ -7,21 +7,25 @@ import { SEED_RESTAURANTS, SEED_FOOD_ITEMS, SEED_COUPONS, SEED_ROLES, SEED_PRICI
 const WIPE_FLAG = "--confirm-wipe";
 
 /**
- * DESTRUCTIVE when run with --confirm-wipe: drops every database on the
- * cluster except Mongo's own internal ones. Requested explicitly; guarded by
- * the flag so `npm run seed` can never do it by accident.
+ * DESTRUCTIVE when run with --confirm-wipe: drops ONLY the Goocart database
+ * named by MONGODB_DB.
+ *
+ * Scoped deliberately. This cluster also hosts other projects (fileseva runs
+ * its production data here), and dropping neighbouring databases would
+ * destroy live systems with no way back on the free tier.
  */
-async function wipeCluster(): Promise<void> {
-  const admin = mongoose.connection.getClient().db().admin();
-  const { databases } = await admin.listDatabases();
-  const protectedDbs = new Set(["admin", "local", "config"]);
+async function wipeGoocartDatabase(): Promise<void> {
+  const target = dbName();
+  const client = mongoose.connection.getClient();
 
-  for (const db of databases) {
-    if (protectedDbs.has(db.name)) continue;
-    process.stdout.write(`  dropping database "${db.name}" ... `);
-    await mongoose.connection.getClient().db(db.name).dropDatabase();
-    console.log("done");
-  }
+  const { databases } = await client.db().admin().listDatabases();
+  const others = databases.map((d) => d.name).filter((n) => !["admin", "local", "config", target].includes(n));
+
+  process.stdout.write(`  dropping database "${target}" ... `);
+  await client.db(target).dropDatabase();
+  console.log("done");
+
+  if (others.length) console.log(`  left untouched: ${others.join(", ")}`);
 }
 
 async function seed(): Promise<void> {
@@ -32,11 +36,11 @@ async function seed(): Promise<void> {
   console.log("Connected.\n");
 
   if (wipe) {
-    console.log("WIPING CLUSTER — every database except admin/local/config:");
-    await wipeCluster();
+    console.log(`WIPING the "${dbName()}" database only:`);
+    await wipeGoocartDatabase();
     console.log("");
   } else {
-    console.log(`Upserting into "${dbName()}" (pass ${WIPE_FLAG} to wipe the cluster first).\n`);
+    console.log(`Upserting into "${dbName()}" (pass ${WIPE_FLAG} to drop it first).\n`);
   }
 
   // Roles and their permissions.

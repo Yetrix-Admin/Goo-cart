@@ -76,8 +76,15 @@ authRouter.post("/otp/request", async (req, res) => {
     if (purpose === "SIGNUP" && existing) return res.status(409).json(fail("ACCOUNT_EXISTS", "An account already exists — sign in instead"));
     if (purpose === "LOGIN" && !existing) return res.status(404).json(fail("ACCOUNT_NOT_FOUND", "No account found — sign up instead"));
 
-    await issueOtp(identifier, purpose);
-    res.json(ok({ identifier }, "Verification code sent"));
+    const result = await issueOtp(identifier, purpose);
+    // Never claim delivery that did not happen. In development the code is in
+    // the server log; the client shows that instead of a false success.
+    res.json(
+      ok(
+        { identifier, delivered: result.delivered },
+        result.delivered ? "Verification code sent" : `${result.reason ?? "Code not delivered"} — check the server log for the code`,
+      ),
+    );
   } catch (e) {
     res.status(500).json(fail("OTP_REQUEST_FAILED", e instanceof Error ? e.message : "Could not send code"));
   }

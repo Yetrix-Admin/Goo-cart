@@ -36,13 +36,16 @@ database password.
 
 ```bash
 npm run seed            # upsert the catalog into MONGODB_DB (safe, repeatable)
-npm run seed:reset      # DROPS EVERY DATABASE on the cluster first
+npm run seed:reset      # drop the MONGODB_DB database first, then seed
 ```
 
-`seed:reset` is destructive and irreversible. It drops every database except
-Mongo's internal `admin`, `local` and `config` — including databases belonging
-to other projects on the same cluster. The plain `seed` is idempotent: it
-upserts by `slug`/`code`, so running it twice does not duplicate anything.
+`seed:reset` drops **only** the database named by `MONGODB_DB`. Other
+databases on the same cluster are listed and left alone — this cluster is
+shared with other projects, and dropping a neighbouring database would destroy
+a live system with no way back on the free tier.
+
+The plain `seed` is idempotent: it upserts by `slug`/`code`, so running it
+twice does not duplicate anything.
 
 Seeds 10 restaurants, 19 menu items (with variants and add-ons embedded),
 3 coupons, 10 roles and 6 service configs.
@@ -103,7 +106,10 @@ equivalent of `AUTOINCREMENT`.
 
 ## Not yet done
 
-- The **web vendor/admin portal still reads D1**. Only the mobile `/api/v1`
-  surface is on MongoDB.
-- No payment gateway. `paymentStatus` is set optimistically on order creation.
-- OTP codes are logged to the console; no SMS/email provider is wired.
+- No payment gateway. `paymentStatus` is set optimistically on order creation;
+  the app still shows clearly-labelled demo payment buttons.
+- **Email OTP** is delivered through Resend when `RESEND_API_KEY` and
+  `RESEND_FROM_EMAIL` are set; the sending domain must be verified in Resend
+  or the send is rejected. **SMS OTP has no provider** — phone codes are
+  logged. In both fallback cases the API reports `delivered: false` rather
+  than claiming a code was sent.

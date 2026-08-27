@@ -12,7 +12,16 @@ import { fail, ok } from "./lib/http.js";
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(cors());
+// Browsers are restricted to the configured origins; native apps send no
+// Origin header and are unaffected. Unset ALLOWED_ORIGINS means allow all,
+// which suits local development only.
+const allowed = (process.env.ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+app.use(
+  cors({
+    credentials: true,
+    origin: allowed.length ? (origin, cb) => cb(null, !origin || allowed.includes(origin)) : true,
+  }),
+);
 app.use(express.json({ limit: "1mb" }));
 app.use(attachUser);
 
