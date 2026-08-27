@@ -1,19 +1,18 @@
-import { env } from "cloudflare:workers";
-
 // Every API call is served by the Node + MongoDB service in server/.
 //
-// MongoDB cannot run on the Cloudflare Workers runtime this app is deployed to
-// (the Atlas Data API was retired in September 2025, and the driver requires
-// net.Socket). Rather than maintain two implementations, the Worker forwards
-// the whole /api surface to the Node service, so no D1 query remains.
+// MongoDB cannot run on the Cloudflare Workers runtime this app previously
+// deployed to (the Atlas Data API was retired in September 2025, and the
+// driver requires net.Socket). Rather than maintain two implementations,
+// this app forwards the whole /api surface to the Node service — this app
+// is now plain Next.js, so a standard process.env read is all that's needed.
 //
 // Set GOOCART_API_URL to the deployed API origin in production.
 
 const DEFAULT_API = "http://localhost:3001";
 
 function apiBase(): string {
-  const configured = (env as unknown as Record<string, unknown>).GOOCART_API_URL;
-  return (typeof configured === "string" && configured ? configured : DEFAULT_API).replace(/\/$/, "");
+  const configured = process.env.GOOCART_API_URL;
+  return (configured || DEFAULT_API).replace(/\/$/, "");
 }
 
 async function forward(request: Request): Promise<Response> {
