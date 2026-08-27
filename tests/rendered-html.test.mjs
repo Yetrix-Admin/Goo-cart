@@ -54,10 +54,11 @@ test("server-renders the Goocart application shell and role split is correct", a
   assert.match(html, /Goocart/i);
 
   const page = await readFile(new URL("app/page.tsx", root), "utf8");
-  // Vendor and Delivery Partner are native apps now, not roles rendered by
-  // the web portal — only Customer and Admin remain here.
+  // Customer, Vendor and Delivery Partner are all native apps now — this web
+  // app is the Admin console only.
   assert.doesNotMatch(page, /<Vendor\b/);
   assert.doesNotMatch(page, /<Partner\b/);
-  assert.match(page, /state\.actor\.role==="CUSTOMER"/);
+  assert.doesNotMatch(page, /<Customer\b/);
+  assert.match(page, /state\.actor\.role\.includes\("ADMIN"\)/);
   assert.match(page, /AdminVendors/);
 });
