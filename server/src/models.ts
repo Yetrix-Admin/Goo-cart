@@ -11,6 +11,29 @@ const opts = { timestamps: true, versionKey: false };
 
 // --- Identity -------------------------------------------------------------
 
+// A customer's saved delivery addresses. Always read and written together
+// with the owning user (never queried on their own), so this is embedded
+// rather than a top-level "Address" collection.
+const addressSchema = new Schema(
+  {
+    label: { type: String, enum: ["Home", "Work", "Other"], default: "Home" },
+    house: { type: String, default: "" },
+    street: { type: String, default: "" },
+    landmark: { type: String, default: "" },
+    area: { type: String, default: "" },
+    city: { type: String, default: "" },
+    pincode: { type: String, default: "" },
+    // Mandatory for delivery assignment and live tracking — validated in the
+    // route layer, not the schema, so a legacy row missing them isn't lost.
+    latitude: { type: Number, required: true },
+    longitude: { type: Number, required: true },
+    contactName: { type: String, default: "" },
+    contactPhone: { type: String, default: "" },
+    isDefault: { type: Boolean, default: false },
+  },
+  { timestamps: true },
+);
+
 const userSchema = new Schema(
   {
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
@@ -24,6 +47,36 @@ const userSchema = new Schema(
     emailVerifiedAt: { type: Date, default: null },
     phoneVerifiedAt: { type: Date, default: null },
     lastLoginAt: { type: Date, default: null },
+
+    // --- Customer -----------------------------------------------------
+    addresses: { type: [addressSchema], default: [] },
+
+    // --- Vendor App user (VENDOR_OWNER / VENDOR_MANAGER / VENDOR_STAFF) ----
+    // The restaurant this login belongs to. Owners are also referenced by
+    // Restaurant.ownerUserId (kept for backward compatibility); vendorId is
+    // the source of truth for "which staff belong to which vendor" so one
+    // restaurant can have many logins without touching that field.
+    vendorId: { type: Schema.Types.ObjectId, ref: "Restaurant", default: null, index: true },
+    staffTitle: { type: String, default: null },
+    // Admin-assigned capabilities, e.g. CAN_ACCEPT_ORDER, CAN_MANAGE_PRODUCTS.
+    // VENDOR_OWNER implicitly has every permission (see hasVendorPermission
+    // in lib/auth.ts) regardless of what is stored here.
+    vendorPermissions: { type: [String], default: [] },
+
+    // --- Delivery Partner App user -------------------------------------
+    vehicleType: { type: String, default: null },
+    vehicleNumber: { type: String, default: null },
+    licenceNumber: { type: String, default: null },
+    rcNumber: { type: String, default: null },
+    bankDetails: { type: Schema.Types.Mixed, default: null },
+    photoUrl: { type: String, default: null },
+    partnerApprovalStatus: { type: String, default: "APPROVED" }, // PENDING | APPROVED | REJECTED
+    partnerOnline: { type: Boolean, default: false },
+    // A partner with an active delivery cannot be offered another one.
+    partnerBusy: { type: Boolean, default: false },
+    currentLatitude: { type: Number, default: null },
+    currentLongitude: { type: Number, default: null },
+    locationUpdatedAt: { type: Date, default: null },
   },
   opts,
 );
@@ -87,6 +140,21 @@ const restaurantSchema = new Schema(
     longitude: { type: Number, default: 0 },
     offers: { type: [offerSchema], default: [] },
     categories: { type: [categorySchema], default: [] },
+
+    // Business details an admin captures when onboarding a vendor.
+    businessType: { type: String, default: null },
+    gst: { type: String, default: null },
+    pan: { type: String, default: null },
+    bankDetails: { type: Schema.Types.Mixed, default: null },
+    openingTime: { type: String, default: null },
+    closingTime: { type: String, default: null },
+    serviceRadiusKm: { type: Number, default: 8 },
+    status: { type: String, default: "ACTIVE", index: true }, // ACTIVE | SUSPENDED | DISABLED
+
+    // The vendor-level toggle from spec section 15. true = an authorized
+    // vendor user must press Accept before the order (and delivery
+    // broadcast) proceeds; false = the backend accepts automatically.
+    manualOrderAcceptance: { type: Boolean, default: true },
   },
   opts,
 );
@@ -164,6 +232,22 @@ const statusEventSchema = new Schema(
   { _id: false },
 );
 
+// The immutable operational timeline (spec section 38) — distinct from
+// statusHistory above, which is the smaller customer-facing progress list.
+// This one carries system events too (VENDOR_NOTIFIED, DELIVERY_OFFER_*,
+// GPS_TRACKING_STARTED) with the actor and free-form metadata, and nothing
+// ever mutates or removes an entry once appended.
+const orderEventSchema = new Schema(
+  {
+    event: { type: String, required: true },
+    actorType: { type: String, required: true }, // customer | vendor | partner | admin | system
+    actorId: { type: Schema.Types.ObjectId, default: null },
+    at: { type: Date, default: Date.now },
+    metadata: { type: Schema.Types.Mixed, default: null },
+  },
+  { _id: false },
+);
+
 const orderSchema = new Schema(
   {
     orderNumber: { type: String, required: true, unique: true },
@@ -196,11 +280,29 @@ const orderSchema = new Schema(
     partnerName: { type: String, default: null },
     items: { type: [orderItemSchema], default: [] },
     statusHistory: { type: [statusEventSchema], default: [] },
+    events: { type: [orderEventSchema], default: [] },
+
+    // --- Vendor acceptance (spec sections 15-18, 43) --------------------
+    manualAcceptanceRequired: { type: Boolean, default: true },
+    manualAcceptanceDeadlineAt: { type: Date, default: null },
+    autoAccepted: { type: Boolean, default: false },
+
+    // --- Delivery offer / atomic assignment (spec sections 25-30, 41-42) --
+    // NONE: not yet broadcast. OFFERING: sent to eligible partners, first to
+    // accept wins. ASSIGNED: partnerId is authoritative. EXPIRED: nobody
+    // accepted in time (retried with a wider radius or escalated to admin).
+    deliveryOfferStatus: { type: String, default: "NONE", index: true },
+    deliveryOfferedPartnerIds: { type: [Schema.Types.ObjectId], default: [] },
+    deliveryOfferStartedAt: { type: Date, default: null },
+    deliveryOfferExpiresAt: { type: Date, default: null },
+    deliveryOfferRadiusKm: { type: Number, default: null },
+    deliveryOfferAttempts: { type: Number, default: 0 },
   },
   opts,
 );
 orderSchema.index({ customerId: 1, createdAt: -1 });
 orderSchema.index({ restaurantId: 1, status: 1 });
+orderSchema.index({ deliveryOfferStatus: 1, deliveryOfferExpiresAt: 1 });
 
 // --- Platform -------------------------------------------------------------
 
@@ -219,6 +321,30 @@ const auditLogSchema = new Schema(
   opts,
 );
 const counterSchema = new Schema({ _id: { type: String }, seq: { type: Number, default: 0 } }, { versionKey: false });
+
+// One row per device a user has ever logged into from, so a push can reach
+// every phone they use rather than just the most recent one.
+const deviceTokenSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    token: { type: String, required: true, unique: true },
+    platform: { type: String, default: "unknown" }, // ios | android | web
+  },
+  opts,
+);
+
+const notificationSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    title: { type: String, required: true },
+    body: { type: String, default: "" },
+    data: { type: Schema.Types.Mixed, default: null },
+    channel: { type: String, default: "GENERAL" },
+    readAt: { type: Date, default: null },
+  },
+  opts,
+);
+notificationSchema.index({ userId: 1, createdAt: -1 });
 
 // --- Multi-service commerce (vendor/admin portal) --------------------------
 // Distinct from the food catalog above: these back the Grocery, Vegetables,
@@ -300,6 +426,8 @@ export const Setting = model("Setting", settingSchema);
 export const ServiceConfig = model("ServiceConfig", serviceConfigSchema);
 export const AuditLog = model("AuditLog", auditLogSchema);
 export const Counter = model("Counter", counterSchema);
+export const DeviceToken = model("DeviceToken", deviceTokenSchema);
+export const Notification = model("Notification", notificationSchema);
 
 export type UserDoc = InferSchemaType<typeof userSchema> & { _id: mongoose.Types.ObjectId };
 export type RestaurantDoc = InferSchemaType<typeof restaurantSchema> & { _id: mongoose.Types.ObjectId };

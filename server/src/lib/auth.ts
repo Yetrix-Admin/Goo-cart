@@ -14,10 +14,30 @@ export function canAdmin(u: { role: string }) {
   return ADMIN_ROLES.includes(u.role);
 }
 export function canVendor(u: { role: string }) {
-  return u.role === "VENDOR_OWNER" || u.role === "VENDOR_MANAGER";
+  return u.role === "VENDOR_OWNER" || u.role === "VENDOR_MANAGER" || u.role === "VENDOR_STAFF";
 }
 export function canPartner(u: { role: string }) {
   return u.role === "DELIVERY_PARTNER";
+}
+
+/**
+ * VENDOR_OWNER always has every permission — they created/own the store and
+ * an admin has not necessarily set an explicit list for them. Every other
+ * vendor login (manager, staff) is gated strictly by what admin assigned.
+ */
+export function hasVendorPermission(u: { role: string; vendorPermissions?: string[] }, permission: string): boolean {
+  if (u.role === "VENDOR_OWNER") return true;
+  return (u.vendorPermissions ?? []).includes(permission);
+}
+
+/** A delivery partner is eligible for new work only when all three hold. */
+export function isPartnerEligible(u: {
+  status: string;
+  partnerApprovalStatus?: string;
+  partnerOnline?: boolean;
+  partnerBusy?: boolean;
+}): boolean {
+  return u.status === "ACTIVE" && u.partnerApprovalStatus === "APPROVED" && Boolean(u.partnerOnline) && !u.partnerBusy;
 }
 
 export function defaultRoleForEmail(email: string): string {

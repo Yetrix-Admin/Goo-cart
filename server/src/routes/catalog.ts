@@ -25,6 +25,8 @@ function toRestaurantDTO(r: any) {
     latitude: r.latitude,
     longitude: r.longitude,
     offers: (r.offers ?? []).map((o: any) => ({ title: o.title, description: o.description ?? null })),
+    manualOrderAcceptance: r.manualOrderAcceptance !== false,
+    status: r.status ?? "ACTIVE",
   };
 }
 

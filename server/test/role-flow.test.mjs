@@ -51,6 +51,15 @@ test("customer -> vendor -> delivery partner flow is role-scoped and complete", 
     return result.json.data;
   }
 
+  async function waitForOfferStatus(orderId, token, status, tries = 40) {
+    for (let i = 0; i < tries; i += 1) {
+      const res = await request(`/api/v1/orders/${orderId}`, { token });
+      if (res.json.data?.order?.deliveryOfferStatus === status) return res.json.data.order;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error(`Order never reached deliveryOfferStatus=${status}`);
+  }
+
   const admin = await signup("admin@flow.test", "Flow Admin");
   const vendor = await signup("vendor@flow.test", "Flow Vendor");
   const partner = await signup("partner@flow.test", "Flow Partner");
@@ -65,6 +74,8 @@ test("customer -> vendor -> delivery partner flow is role-scoped and complete", 
     name: "Flow Kitchen",
     area: "Test Area",
     isOpen: true,
+    latitude: 17.4362,
+    longitude: 81.2661,
     categories: [{ key: "mains", name: "Mains", sortOrder: 1 }],
   });
 
@@ -103,6 +114,33 @@ test("customer -> vendor -> delivery partner flow is role-scoped and complete", 
   const orderId = placed.json.data.order.id;
   const deliveryOtp = placed.json.data.order.deliveryOtp;
   assert.match(deliveryOtp, /^\d{4}$/);
+  // Manual acceptance defaults to on, so the order starts PLACED, not
+  // pre-accepted, and no delivery offer exists until the vendor accepts.
+  assert.equal(placed.json.data.order.status, "PLACED");
+  assert.equal(placed.json.data.order.manualAcceptanceRequired, true);
+
+  // A delivery partner cannot even claim this order yet — it hasn't reached
+  // READY_FOR_PICKUP, so the state machine itself rejects the jump.
+  const tooEarly = await request(`/api/v1/orders/${orderId}/transition`, {
+    token: partner.token,
+    method: "POST",
+    body: { to: "DELIVERY_PARTNER_ASSIGNED" },
+  });
+  assert.equal(tooEarly.status, 409);
+  assert.equal(tooEarly.json.error.code, "INVALID_TRANSITION");
+
+  // The partner goes online and reports a location near the restaurant
+  // *before* the vendor marks the order ready, so the broadcast that fires
+  // on READY_FOR_PICKUP finds them.
+  const online = await request("/api/v1/partner/online", { token: partner.token, method: "POST", body: { value: true } });
+  assert.equal(online.status, 200);
+  assert.equal(online.json.data.online, true);
+  const located = await request("/api/v1/partner/location", {
+    token: partner.token,
+    method: "POST",
+    body: { latitude: 17.437, longitude: 81.2665, accuracy: 5 },
+  });
+  assert.equal(located.status, 200, JSON.stringify(located.json));
 
   for (const to of ["VENDOR_ACCEPTED", "PREPARING", "READY_FOR_PICKUP"]) {
     const moved = await request(`/api/v1/orders/${orderId}/transition`, {
@@ -113,19 +151,24 @@ test("customer -> vendor -> delivery partner flow is role-scoped and complete", 
     assert.equal(moved.status, 200, `${to}: ${JSON.stringify(moved.json)}`);
   }
 
-  const offlineClaim = await request(`/api/v1/orders/${orderId}/transition`, {
+  // Marking READY_FOR_PICKUP triggers an async broadcast to nearby online
+  // partners — wait for it to land rather than assuming it's instantaneous.
+  const offering = await waitForOfferStatus(orderId, partner.token, "OFFERING");
+  assert.equal(offering.status, "READY_FOR_PICKUP");
+
+  // Going offline mid-offer makes the partner ineligible to actually claim
+  // it, even though the offer still names them.
+  await request("/api/v1/partner/online", { token: partner.token, method: "POST", body: { value: false } });
+  const notEligible = await request(`/api/v1/orders/${orderId}/transition`, {
     token: partner.token,
     method: "POST",
     body: { to: "DELIVERY_PARTNER_ASSIGNED" },
   });
-  assert.equal(offlineClaim.status, 409);
-  assert.equal(offlineClaim.json.error.code, "PARTNER_OFFLINE");
+  assert.equal(notEligible.status, 409);
+  assert.equal(notEligible.json.error.code, "PARTNER_NOT_ELIGIBLE");
+  await request("/api/v1/partner/online", { token: partner.token, method: "POST", body: { value: true } });
 
-  const online = await request("/api/v1/partner/online", { token: partner.token, method: "POST", body: { value: true } });
-  assert.equal(online.status, 200);
-  assert.equal(online.json.data.online, true);
-
-  for (const to of ["DELIVERY_PARTNER_ASSIGNED", "PICKED_UP", "ON_THE_WAY", "ARRIVED"]) {
+  for (const to of ["DELIVERY_PARTNER_ASSIGNED", "GOING_TO_VENDOR", "ARRIVED_AT_VENDOR", "PICKED_UP", "ON_THE_WAY", "ARRIVED"]) {
     const moved = await request(`/api/v1/orders/${orderId}/transition`, {
       token: partner.token,
       method: "POST",

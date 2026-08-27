@@ -1,4 +1,5 @@
 import "dotenv/config";
+import http from "node:http";
 import express from "express";
 import cors from "cors";
 import { connectDb, dbName } from "./lib/db.js";
@@ -10,7 +11,11 @@ import { portalRouter } from "./routes/portal.js";
 import { vendorRouter } from "./routes/vendor.js";
 import { adminRouter } from "./routes/admin.js";
 import { partnerRouter } from "./routes/partner.js";
+import { customerRouter } from "./routes/customer.js";
+import { notificationsRouter } from "./routes/notifications.js";
 import { fail, ok } from "./lib/http.js";
+import { initRealtime } from "./lib/realtime.js";
+import { startAcceptanceWatchdog } from "./lib/acceptanceWatchdog.js";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -65,6 +70,8 @@ app.use("/api/v1/orders", ordersRouter);
 app.use("/api/v1/vendor", vendorRouter);
 app.use("/api/v1/admin", adminRouter);
 app.use("/api/v1/partner", partnerRouter);
+app.use("/api/v1/customer", customerRouter);
+app.use("/api/v1/notifications", notificationsRouter);
 
 // Vendor / delivery-partner / admin web portal. Kept on the legacy
 // /api/goocart path so the existing UI needs no change.
@@ -81,14 +88,24 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 
 // Exported for serverless hosts (Vercel), which import the app and handle
 // listening themselves. Calling app.listen() there would hang the function.
+// NOTE: Socket.IO needs a persistent process to hold connections open, which
+// a serverless function cannot do — realtime only exists on the host that
+// actually calls httpServer.listen() below (Render, per render.yaml). A
+// Vercel deployment of this app would serve REST fine but with no realtime.
 export default app;
 
 // Only bind a port when started directly, e.g. `npm run dev` or `npm start`.
 const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
 if (!isServerless) {
+  const httpServer = http.createServer(app);
+  initRealtime(httpServer);
+
   connectDb()
-    .then(() => console.log(`MongoDB connected (database: ${dbName()}).`))
+    .then(() => {
+      console.log(`MongoDB connected (database: ${dbName()}).`);
+      startAcceptanceWatchdog();
+    })
     .catch((e) => {
       // Log loudly but keep serving: /health then reports the real state
       // instead of the process vanishing with no explanation.
@@ -96,8 +113,9 @@ if (!isServerless) {
       console.error("Check MONGODB_URI in server/.env and that your IP is allowed in Atlas -> Network Access.");
     });
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Goocart API listening on http://0.0.0.0:${PORT}`);
     console.log(`Health check: http://localhost:${PORT}/health`);
+    console.log(`Realtime (Socket.IO) is live on the same port.`);
   });
 }
