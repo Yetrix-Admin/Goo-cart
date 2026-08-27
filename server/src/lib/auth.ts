@@ -29,10 +29,34 @@ export function defaultRoleForEmail(email: string): string {
   return "CUSTOMER";
 }
 
-// bcrypt replaces the PBKDF2-via-WebCrypto used on Workers; on Node it is the
-// stronger, conventional choice and the cost factor is tunable.
+// New passwords use bcrypt. Imported D1 accounts keep their PBKDF2 hash until
+// the first successful login, so existing customers are not locked out during
+// the database migration.
 export const hashPassword = (plain: string) => bcrypt.hash(plain, 12);
-export const verifyPassword = (plain: string, hash: string) => bcrypt.compare(plain, hash);
+export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
+  if (!hash.startsWith("pbkdf2$")) return bcrypt.compare(plain, hash);
+
+  const [algorithm, iterationsText, saltHex, expectedHex] = hash.split("$");
+  const iterations = Number(iterationsText);
+  if (
+    algorithm !== "pbkdf2" ||
+    !Number.isSafeInteger(iterations) ||
+    iterations < 1 ||
+    !/^[0-9a-f]+$/i.test(saltHex ?? "") ||
+    !/^[0-9a-f]+$/i.test(expectedHex ?? "")
+  ) {
+    return false;
+  }
+
+  const expected = Buffer.from(expectedHex, "hex");
+  const actual = await new Promise<Buffer>((resolve, reject) => {
+    crypto.pbkdf2(plain, Buffer.from(saltHex, "hex"), iterations, expected.length, "sha256", (error, value) => {
+      if (error) reject(error);
+      else resolve(value);
+    });
+  });
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
 
 const sha256 = (v: string) => crypto.createHash("sha256").update(v).digest("hex");
 
@@ -50,6 +74,19 @@ export async function createSession(userId: unknown, meta: { ip?: string; userAg
 
 export async function revokeSession(token: string): Promise<void> {
   await Session.updateOne({ tokenHash: sha256(token), revokedAt: null }, { $set: { revokedAt: new Date() } });
+}
+
+export function setSessionCookie(res: Response, token: string): void {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.append(
+    "set-cookie",
+    `goocart_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_DAYS * 86400}${secure}`,
+  );
+}
+
+export function clearSessionCookie(res: Response): void {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.append("set-cookie", `goocart_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`);
 }
 
 export async function userFromToken(token: string): Promise<UserDoc | null> {
@@ -105,7 +142,7 @@ export async function consumeOtp(identifier: string, purpose: string, code: stri
 
 export type AuthedRequest = Request & { user?: UserDoc };
 
-function readToken(req: Request): string | null {
+export function sessionTokenFromRequest(req: Request): string | null {
   const auth = req.header("authorization");
   if (auth?.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim() || null;
   const cookie = req.header("cookie");
@@ -121,7 +158,7 @@ function readToken(req: Request): string | null {
 /** Populates req.user when a valid session is present; never rejects. */
 export async function attachUser(req: AuthedRequest, _res: Response, next: NextFunction) {
   try {
-    const token = readToken(req);
+    const token = sessionTokenFromRequest(req);
     if (token) req.user = (await userFromToken(token)) ?? undefined;
   } catch {
     /* fall through unauthenticated */

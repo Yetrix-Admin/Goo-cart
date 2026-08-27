@@ -9,7 +9,7 @@ import { env } from "cloudflare:workers";
 //
 // Set GOOCART_API_URL to the deployed API origin in production.
 
-const DEFAULT_API = "http://localhost:3000";
+const DEFAULT_API = "http://localhost:3001";
 
 function apiBase(): string {
   const configured = (env as unknown as Record<string, unknown>).GOOCART_API_URL;

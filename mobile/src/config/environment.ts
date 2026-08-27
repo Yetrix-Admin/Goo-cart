@@ -12,7 +12,7 @@ import Constants from "expo-constants";
 // If neither works we surface `apiConfigError` and let the UI show a clear
 // message. Throwing here would crash the app before it can render anything.
 
-const DEV_BACKEND_PORT = 3000;
+const DEV_BACKEND_PORT = 3001;
 
 function inferDevHost(): string | null {
   const constants = Constants as unknown as {

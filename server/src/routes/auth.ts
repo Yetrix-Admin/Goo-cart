@@ -4,9 +4,12 @@ import {
   consumeOtp,
   createSession,
   defaultRoleForEmail,
+  clearSessionCookie,
   hashPassword,
   issueOtp,
   revokeSession,
+  sessionTokenFromRequest,
+  setSessionCookie,
   verifyPassword,
   requireAuth,
   type AuthedRequest,
@@ -30,6 +33,7 @@ async function handleSignup(req: Request, res: Response) {
 
     const user = await User.create({ email, name, passwordHash: await hashPassword(password), role: defaultRoleForEmail(email), status: "ACTIVE" });
     const token = await createSession(user._id, { ip: req.ip, userAgent: req.header("user-agent") });
+    setSessionCookie(res, token);
     res.json(ok({ user: publicUser(user), token }, "Account created"));
   } catch (e) {
     res.status(500).json(fail("SIGNUP_FAILED", e instanceof Error ? e.message : "Signup failed"));
@@ -50,9 +54,13 @@ async function handleLogin(req: Request, res: Response) {
     }
     if (user.status !== "ACTIVE") return res.status(403).json(fail("ACCOUNT_DISABLED", "This account is not active"));
 
+    // Transparently upgrade a migrated D1 PBKDF2 password after it has been
+    // proven correct. No reset is required and future logins use bcrypt.
+    if (user.passwordHash.startsWith("pbkdf2$")) user.passwordHash = await hashPassword(password);
     user.lastLoginAt = new Date();
     await user.save();
     const token = await createSession(user._id, { ip: req.ip, userAgent: req.header("user-agent") });
+    setSessionCookie(res, token);
     res.json(ok({ user: publicUser(user), token }, "Signed in"));
   } catch (e) {
     res.status(500).json(fail("LOGIN_FAILED", e instanceof Error ? e.message : "Sign in failed"));
@@ -123,6 +131,7 @@ authRouter.post("/otp/verify", async (req, res) => {
     }
 
     const token = await createSession(user._id, { ip: req.ip, userAgent: req.header("user-agent") });
+    setSessionCookie(res, token);
     res.json(ok({ user: publicUser(user), token }, "Signed in"));
   } catch (e) {
     res.status(500).json(fail("OTP_VERIFY_FAILED", e instanceof Error ? e.message : "Could not verify code"));
@@ -142,7 +151,8 @@ authRouter.post("/token", async (req, res) => {
 authRouter.get("/me", requireAuth, (req: AuthedRequest, res) => res.json(ok({ user: publicUser(req.user) })));
 
 authRouter.post("/logout", async (req, res) => {
-  const auth = req.header("authorization");
-  if (auth?.toLowerCase().startsWith("bearer ")) await revokeSession(auth.slice(7).trim());
+  const token = sessionTokenFromRequest(req);
+  if (token) await revokeSession(token);
+  clearSessionCookie(res);
   res.json(ok(null, "Signed out"));
 });

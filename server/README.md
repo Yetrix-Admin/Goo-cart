@@ -50,6 +50,23 @@ twice does not duplicate anything.
 Seeds 10 restaurants, 19 menu items (with variants and add-ons embedded),
 3 coupons, 10 roles and 6 service configs.
 
+## Migrating existing D1 data
+
+From the repository root, run the migration against the local Miniflare D1
+file. It reads Atlas credentials from `server/.env`, upserts without dropping
+or deleting anything, and can be safely repeated:
+
+```bash
+python scripts/migrate-d1-to-mongodb.py <path-to-d1.sqlite> --dry-run
+python scripts/migrate-d1-to-mongodb.py <path-to-d1.sqlite>
+```
+
+Users, sessions, catalog data, food orders, service orders, portal data,
+settings, permissions, and audit history are all mapped into the collections
+used by this API. Former SQL child tables are embedded in their parent
+documents. Migrated PBKDF2 passwords continue to work and are upgraded to
+bcrypt after the customer's next successful login.
+
 ## Running
 
 ```bash
@@ -61,7 +78,7 @@ npm run typecheck
 Health check — reports whether Mongo is genuinely reachable:
 
 ```bash
-curl http://localhost:3000/health
+curl http://localhost:3001/health
 ```
 
 ## Endpoints

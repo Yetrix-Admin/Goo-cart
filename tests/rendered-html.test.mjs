@@ -26,10 +26,11 @@ test("server-renders the Goocart application shell", async () => {
 });
 
 test("vendor and delivery apps are role-routed with complete lifecycle actions", async () => {
-  const [page, route, migrations] = await Promise.all([
+  const [page, proxy, portal, migration] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
-    readFile(new URL("app/api/goocart/route.ts", root), "utf8"),
-    readFile(new URL("db/migrations.ts", root), "utf8"),
+    readFile(new URL("app/api/[...path]/route.ts", root), "utf8"),
+    readFile(new URL("server/src/routes/portal.ts", root), "utf8"),
+    readFile(new URL("scripts/migrate-d1-to-mongodb.py", root), "utf8"),
   ]);
 
   assert.match(page, /state\.actor\.role==="DELIVERY_PARTNER"\?<Partner/);
@@ -37,9 +38,10 @@ test("vendor and delivery apps are role-routed with complete lifecycle actions",
   assert.match(page, /Receive[\s\S]*Accept[\s\S]*Prepare[\s\S]*Hand off[\s\S]*Get paid/);
   assert.match(page, /Go online[\s\S]*Accept[\s\S]*Navigate[\s\S]*Verify[\s\S]*Earn/);
   assert.match(page, /Customer verification PIN/);
-  assert.match(route, /ACTIVE_TASK_EXISTS/);
-  assert.match(route, /INVALID_VERIFICATION_CODE/);
-  assert.match(route, /VENDOR_CLOSED/);
-  assert.match(route, /offer\.create/);
-  assert.match(migrations, /name: "vendor_offers"/);
+  assert.match(proxy, /GOOCART_API_URL/);
+  assert.match(portal, /ACTIVE_TASK_EXISTS/);
+  assert.match(portal, /INVALID_VERIFICATION_CODE/);
+  assert.match(portal, /VENDOR_CLOSED/);
+  assert.match(portal, /offer\.create/);
+  assert.match(migration, /vendor_offers/);
 });

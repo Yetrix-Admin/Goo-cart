@@ -10,7 +10,7 @@ import { portalRouter } from "./routes/portal.js";
 import { fail, ok } from "./lib/http.js";
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 3001;
 
 // Browsers are restricted to the configured origins; native apps send no
 // Origin header and are unaffected. Unset ALLOWED_ORIGINS means allow all,
@@ -34,6 +34,9 @@ app.get("/health", async (_req, res) => {
 });
 
 app.use("/api/v1/auth", authRouter);
+// The web portal predates the versioned mobile API and keeps this shorter
+// path. Both mounts share the same users and sessions in Atlas.
+app.use("/api/auth", authRouter);
 app.use("/api/v1/catalog", catalogRouter);
 app.use("/api/v1/orders", ordersRouter);
 
