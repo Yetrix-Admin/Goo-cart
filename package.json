@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern server --ignore-pattern mobile",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern server --ignore-pattern mobile --ignore-pattern customer --ignore-pattern vendor --ignore-pattern partner",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

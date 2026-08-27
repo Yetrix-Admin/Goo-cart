@@ -49,16 +49,24 @@ yarn-error.log*
 goocart-site.tar.gz
 .openai/goocart-site.tar.gz
 
-# --- Mobile (Expo) secrets -------------------------------------------------
-# The mobile app is part of this monorepo, but its signing key, signing
+# --- Customer app (Expo) secrets --------------------------------------------
+# The customer app is part of this monorepo, but its signing key, signing
 # passwords and machine-local paths must never be committed. Losing the
 # keystore means you can never update an app already on the Play Store.
+# (Still named mobile/ below too: its android/ folder hasn't been moved to
+# customer/ yet — Android Studio had it open during the customer/ rename.)
+customer/.env
+customer/android/local.properties
+customer/android/gradle.properties
+customer/android/app/*.keystore
+customer/**/*.keystore
+customer/**/*.jks
 mobile/.env
-mobile/android/local.properties
-mobile/android/gradle.properties
-mobile/android/app/*.keystore
-mobile/**/*.keystore
-mobile/**/*.jks
+# The whole tree, not just the secrets: this is generated `expo prebuild`
+# output, not source — same reason it's blanket-ignored under customer/.expo
+# and customer/android/ etc via customer/.gitignore. It has no .gitignore of
+# its own to fall back on since customer/'s inherited it in the rename.
+mobile/android/
 
 # --- Delivery Partner app (Expo) secrets -----------------------------------
 partner/.env
@@ -77,6 +85,7 @@ vendor/**/*.keystore
 vendor/**/*.jks
 
 # Machine-local IDE state
+customer/.idea/
 mobile/.idea/
 partner/.idea/
 vendor/.idea/
