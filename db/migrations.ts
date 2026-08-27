@@ -312,7 +312,10 @@ const migrations: Migration[] = [
     ],
   },
   {
-    id: 4,
+    // id 6: this migration originally shipped as id 4, colliding with
+    // "food_orders". The runner records applied ids, so the duplicate was
+    // silently skipped and vendor_offers was never created.
+    id: 6,
     name: "vendor_offers",
     statements: [
       `CREATE TABLE IF NOT EXISTS vendor_offers (
