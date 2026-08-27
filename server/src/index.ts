@@ -7,6 +7,9 @@ import { authRouter } from "./routes/auth.js";
 import { catalogRouter } from "./routes/catalog.js";
 import { ordersRouter } from "./routes/orders.js";
 import { portalRouter } from "./routes/portal.js";
+import { vendorRouter } from "./routes/vendor.js";
+import { adminRouter } from "./routes/admin.js";
+import { partnerRouter } from "./routes/partner.js";
 import { fail, ok } from "./lib/http.js";
 
 const app = express();
@@ -55,6 +58,13 @@ app.use("/api/v1/auth", authRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/v1/catalog", catalogRouter);
 app.use("/api/v1/orders", ordersRouter);
+
+// Restaurant/menu management for the Vendor app, ownership assignment for the
+// Admin web app, and online-status for the Delivery Partner app. Each is
+// gated to its role by requireRole() inside the router itself.
+app.use("/api/v1/vendor", vendorRouter);
+app.use("/api/v1/admin", adminRouter);
+app.use("/api/v1/partner", partnerRouter);
 
 // Vendor / delivery-partner / admin web portal. Kept on the legacy
 // /api/goocart path so the existing UI needs no change.
