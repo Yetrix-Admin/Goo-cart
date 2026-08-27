@@ -30,7 +30,9 @@ interface Fetcher {
 
 declare module "cloudflare:workers" {
   interface Env {
-    DB: D1Database;
+    // The API and its MongoDB connection live in server/; the Worker only
+    // serves the UI and forwards /api to it.
+    GOOCART_API_URL?: string;
     ASSETS: Fetcher;
     ADMIN_USER_EMAILS?: string;
     VENDOR_USER_EMAILS?: string;
