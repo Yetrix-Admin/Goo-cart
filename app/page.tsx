@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 
 type Service = "Food" | "Grocery" | "Vegetables" | "Mart" | "Bike Taxi" | "Parcel";
 type Product = { id:string; service:Service; vendor:string; name:string; description:string; price:number; stock:number; rating:number; eta:string };
@@ -20,7 +21,7 @@ const terminalStatuses=["DELIVERED","COMPLETED","CANCELLED_BY_ADMIN","VENDOR_REJ
 function detail(order:Order,key:string,fallback="—"){const value=order.details[key];return typeof value==="string"||typeof value==="number"?String(value):fallback;}
 function orderSummary(order:Order){const items=Array.isArray(order.details.items)?order.details.items as {name?:string;qty?:number}[]:[];if(items.length)return items.map((x)=>`${x.qty||1}× ${x.name||"Item"}`).join(", ");return order.service==="Parcel"?detail(order,"packageType","Parcel"): `${detail(order,"distance","4.2")} km trip`;}
 
-function Brand(){ return <div className="brand"><b>g</b><span>goocart</span></div>; }
+function Brand(){ return <div className="brand"><Image src="/goocart-logo.png" alt="Goocart" width={960} height={161} priority style={{height:26,width:"auto"}}/></div>; }
 function Status({value}:{value:string}){ return <span className={`status status-${value.toLowerCase()}`}>● {label(value)}</span>; }
 function Empty({title,copy}:{title:string;copy:string}){ return <div className="empty-state"><i>g</i><h3>{title}</h3><p>{copy}</p></div>; }
 

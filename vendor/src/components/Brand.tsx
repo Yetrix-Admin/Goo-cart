@@ -1,20 +1,26 @@
-import { StyleSheet, Text, View } from "react-native";
-import { colors, spacing } from "@/theme";
+import { Image, StyleSheet, Text, View } from "react-native";
+import { colors } from "@/theme";
+
+// Real artwork (see assets/images/logo-full.png), not a CSS-drawn stand-in —
+// `size` is the rendered height; width follows the logo's own aspect ratio
+// so it never looks stretched at any scale it's used at across the app.
+const ASPECT_RATIO = 960 / 161;
 
 export function Brand({ size = 32 }: { size?: number }) {
   return (
     <View style={styles.row}>
-      <View style={[styles.mark, { width: size, height: size, borderRadius: size * 0.32 }]}>
-        <Text style={[styles.markText, { fontSize: size * 0.6 }]}>g</Text>
-      </View>
-      <Text style={[styles.name, { fontSize: size * 0.62 }]}>goocart vendor</Text>
+      <Image
+        source={require("../../assets/images/logo-full.png")}
+        style={{ height: size, width: size * ASPECT_RATIO }}
+        resizeMode="contain"
+        accessibilityLabel="Goocart"
+      />
+      <Text style={[styles.suffix, { fontSize: size * 0.42 }]}>VENDOR</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  mark: { backgroundColor: colors.primary, alignItems: "center", justifyContent: "center", borderBottomLeftRadius: 4 },
-  markText: { color: colors.white, fontWeight: "900" },
-  name: { fontWeight: "900", color: colors.dark, letterSpacing: -0.5 },
+  row: { flexDirection: "row", alignItems: "center", gap: 6 },
+  suffix: { fontWeight: "800", color: colors.muted, letterSpacing: 1 },
 });
