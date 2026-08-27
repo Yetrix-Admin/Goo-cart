@@ -282,6 +282,15 @@ const orderSchema = new Schema(
     statusHistory: { type: [statusEventSchema], default: [] },
     events: { type: [orderEventSchema], default: [] },
 
+    // A client-generated key so a retried or double-tapped "Place Order"
+    // request returns the order already created instead of creating a
+    // second one (spec section 48). Scoped per customer, not global — two
+    // different customers using the same key string is not a collision.
+    // Deliberately NO default: the sparse unique index below only excludes
+    // documents where the field is absent, not documents where it's null,
+    // so an order placed without a key must never have this path set at all.
+    idempotencyKey: { type: String },
+
     // --- Vendor acceptance (spec sections 15-18, 43) --------------------
     manualAcceptanceRequired: { type: Boolean, default: true },
     manualAcceptanceDeadlineAt: { type: Date, default: null },
@@ -303,6 +312,13 @@ const orderSchema = new Schema(
 orderSchema.index({ customerId: 1, createdAt: -1 });
 orderSchema.index({ restaurantId: 1, status: 1 });
 orderSchema.index({ deliveryOfferStatus: 1, deliveryOfferExpiresAt: 1 });
+// A partial unique index, not a sparse one: for a COMPOUND index, "sparse"
+// only excludes a document that is missing every indexed field, and
+// customerId is always present — so a plain sparse index would still treat
+// every order that lacks a key as colliding on {customerId, null}. A partial
+// filter is the correct tool: only documents that genuinely carry a key are
+// indexed at all, and the constraint is per-customer, not platform-wide.
+orderSchema.index({ customerId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $exists: true } } });
 
 // --- Platform -------------------------------------------------------------
 

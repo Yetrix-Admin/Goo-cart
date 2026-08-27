@@ -58,6 +58,7 @@
           "locationWhenInUsePermission": "Goocart uses your location to show nearby restaurants, stores and delivery estimates."
         }
       ],
+      "expo-notifications",
       [
         "expo-build-properties",
         {

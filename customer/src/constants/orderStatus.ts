@@ -6,6 +6,8 @@ export const ORDER_STATUS_LABEL: Partial<Record<FoodOrderStatus, string>> = {
   PREPARING: "Preparing your food",
   READY_FOR_PICKUP: "Ready for pickup",
   DELIVERY_PARTNER_ASSIGNED: "Delivery partner assigned",
+  GOING_TO_VENDOR: "Delivery partner heading to restaurant",
+  ARRIVED_AT_VENDOR: "Delivery partner reached the restaurant",
   PICKED_UP: "Picked up",
   ON_THE_WAY: "On the way",
   ARRIVED: "Delivery partner has arrived",

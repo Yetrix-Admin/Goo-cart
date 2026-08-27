@@ -10,6 +10,7 @@ export type CreateOrderInput = {
   couponCode?: string;
   tip: number;
   paymentMethod: PaymentMethod;
+  idempotencyKey?: string;
 };
 
 type OrderState = {
@@ -51,6 +52,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       tip: input.tip,
       instructions: input.instructions,
       deliveryAddress: input.deliveryAddress,
+      idempotencyKey: input.idempotencyKey,
       // Only identifiers and quantities are sent; the server re-prices everything.
       items: input.items.map((i) => ({
         foodItemId: i.foodItemId,

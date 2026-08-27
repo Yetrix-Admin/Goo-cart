@@ -103,6 +103,17 @@ async function vendorRecipients(restaurantId: unknown): Promise<any[]> {
 ordersRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
   try {
     const body = req.body ?? {};
+
+    // Idempotency (spec section 48): a double-tapped "Place Order" or a
+    // client retry after a dropped response must never create a second
+    // order. If the caller sends the same key twice, the order already
+    // created for it is returned as-is instead of creating another.
+    const idempotencyKey = body.idempotencyKey ? String(body.idempotencyKey).slice(0, 128) : null;
+    if (idempotencyKey) {
+      const existing = await Order.findOne({ customerId: req.user!._id, idempotencyKey }).lean();
+      if (existing) return res.json(ok({ order: toOrderDTO(existing, req.user!) }, "Order already placed"));
+    }
+
     const restaurant: any = await Restaurant.findById(body.restaurantId).lean().catch(() => null);
     if (!restaurant) return res.status(404).json(fail("RESTAURANT_NOT_FOUND", "Restaurant not found"));
     if (!restaurant.isOpen) return res.status(409).json(fail("RESTAURANT_CLOSED", `${restaurant.name} is not accepting orders right now.`));
@@ -135,36 +146,53 @@ ordersRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
       events.push({ event: "ORDER_AUTO_ACCEPTED", actorType: "system", actorId: null, at: now } as any);
     }
 
-    const [order] = await Order.create([
-      {
-        orderNumber,
-        customerId: req.user!._id,
-        customerName: req.user!.name,
-        restaurantId: restaurant._id,
-        restaurantName: restaurant.name,
-        restaurantArea: restaurant.area,
-        restaurantLatitude: restaurant.latitude,
-        restaurantLongitude: restaurant.longitude,
-        status: initialStatus,
-        paymentMethod,
-        paymentStatus: paymentMethod === "COD" ? "NOT_APPLICABLE" : "PAID",
-        couponCode: coupon?.code ?? null,
-        instructions: Array.isArray(body.instructions) ? body.instructions : [],
-        bill,
-        deliveryAddress: body.deliveryAddress,
-        deliveryOtp: generateOtp(),
-        estimatedDeliveryMinutes: restaurant.deliveryTimeMax,
-        items: lines,
-        manualAcceptanceRequired,
-        manualAcceptanceDeadlineAt: manualAcceptanceRequired ? new Date(now.getTime() + MANUAL_ACCEPTANCE_TIMEOUT_MINUTES * 60_000) : null,
-        autoAccepted: !manualAcceptanceRequired,
-        statusHistory: [
-          { status: "PLACED", actorId: req.user!._id, actorRole: req.user!.role, at: now },
-          ...(manualAcceptanceRequired ? [] : [{ status: "VENDOR_ACCEPTED", actorId: null, actorRole: "system", at: now }]),
-        ],
-        events,
-      },
-    ]);
+    let order;
+    try {
+      [order] = await Order.create([
+        {
+          orderNumber,
+          customerId: req.user!._id,
+          customerName: req.user!.name,
+          restaurantId: restaurant._id,
+          restaurantName: restaurant.name,
+          restaurantArea: restaurant.area,
+          restaurantLatitude: restaurant.latitude,
+          restaurantLongitude: restaurant.longitude,
+          status: initialStatus,
+          paymentMethod,
+          paymentStatus: paymentMethod === "COD" ? "NOT_APPLICABLE" : "PAID",
+          couponCode: coupon?.code ?? null,
+          instructions: Array.isArray(body.instructions) ? body.instructions : [],
+          bill,
+          deliveryAddress: body.deliveryAddress,
+          deliveryOtp: generateOtp(),
+          estimatedDeliveryMinutes: restaurant.deliveryTimeMax,
+          items: lines,
+          // Only set when provided — see the schema comment on why an
+          // absent key (not a null one) is what makes the sparse unique
+          // index behave correctly for orders placed without one.
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+          manualAcceptanceRequired,
+          manualAcceptanceDeadlineAt: manualAcceptanceRequired ? new Date(now.getTime() + MANUAL_ACCEPTANCE_TIMEOUT_MINUTES * 60_000) : null,
+          autoAccepted: !manualAcceptanceRequired,
+          statusHistory: [
+            { status: "PLACED", actorId: req.user!._id, actorRole: req.user!.role, at: now },
+            ...(manualAcceptanceRequired ? [] : [{ status: "VENDOR_ACCEPTED", actorId: null, actorRole: "system", at: now }]),
+          ],
+          events,
+        },
+      ]);
+    } catch (e: any) {
+      // Two requests carrying the same idempotency key raced past the
+      // check above and both tried to insert — the unique index lets only
+      // one through. The loser fetches and returns the winner's order
+      // rather than erroring, so the client still sees a success either way.
+      if (idempotencyKey && e?.code === 11000) {
+        const winner = await Order.findOne({ customerId: req.user!._id, idempotencyKey }).lean();
+        if (winner) return res.json(ok({ order: toOrderDTO(winner, req.user!) }, "Order already placed"));
+      }
+      throw e;
+    }
 
     await AuditLog.create({
       actorId: req.user!._id,

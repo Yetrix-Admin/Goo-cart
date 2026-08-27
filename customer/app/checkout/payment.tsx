@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
@@ -29,6 +29,11 @@ type Stage = "idle" | "processing" | "failed" | "creating" | "create_failed";
 export default function PaymentScreen() {
   const { method } = useLocalSearchParams<{ method: PaymentMethod }>();
   const [stage, setStage] = useState<Stage>("idle");
+  // Generated once per visit to this screen and reused across every retry
+  // for this same checkout attempt — a double-tap or a retry after a
+  // dropped response resolves to the one order the backend already created
+  // (spec section 48), rather than creating a duplicate.
+  const idempotencyKey = useMemo(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`, []);
 
   const restaurantId = useCartStore((s) => s.restaurantId);
   const items = useCartStore((s) => s.items);
@@ -72,6 +77,7 @@ export default function PaymentScreen() {
         couponCode: couponCode ?? undefined,
         tip: bill.tip,
         paymentMethod: method,
+        idempotencyKey,
       });
       clearCart();
       router.replace({ pathname: "/orders/[id]/confirmation", params: { id: order.id } });
