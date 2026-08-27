@@ -6,6 +6,7 @@ import { attachUser } from "./lib/auth.js";
 import { authRouter } from "./routes/auth.js";
 import { catalogRouter } from "./routes/catalog.js";
 import { ordersRouter } from "./routes/orders.js";
+import { portalRouter } from "./routes/portal.js";
 import { fail, ok } from "./lib/http.js";
 
 const app = express();
@@ -26,6 +27,10 @@ app.get("/health", async (_req, res) => {
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/catalog", catalogRouter);
 app.use("/api/v1/orders", ordersRouter);
+
+// Vendor / delivery-partner / admin web portal. Kept on the legacy
+// /api/goocart path so the existing UI needs no change.
+app.use("/api/goocart", portalRouter);
 
 app.use((_req, res) => res.status(404).json(fail("NOT_FOUND", "No such endpoint")));
 

@@ -1,8 +1,8 @@
 import "dotenv/config";
 import mongoose from "mongoose";
 import { connectDb, dbName, disconnectDb } from "./lib/db.js";
-import { Coupon, FoodItem, Restaurant, Role, ServiceConfig } from "./models.js";
-import { SEED_RESTAURANTS, SEED_FOOD_ITEMS, SEED_COUPONS, SEED_ROLES, SERVICES } from "./seedData.js";
+import { Coupon, FoodItem, PricingRule, Restaurant, Role, ServiceConfig } from "./models.js";
+import { SEED_RESTAURANTS, SEED_FOOD_ITEMS, SEED_COUPONS, SEED_ROLES, SEED_PRICING, SERVICES } from "./seedData.js";
 
 const WIPE_FLAG = "--confirm-wipe";
 
@@ -71,6 +71,11 @@ async function seed(): Promise<void> {
     itemCount++;
   }
   console.log(`food items     ${itemCount}`);
+
+  for (const rule of SEED_PRICING) {
+    await PricingRule.findByIdAndUpdate(rule.service, { baseFare: rule.baseFare, perKm: rule.perKm, platformFee: rule.platformFee }, { upsert: true });
+  }
+  console.log(`pricing rules  ${SEED_PRICING.length}`);
 
   for (const c of SEED_COUPONS) {
     await Coupon.findOneAndUpdate({ code: c.code }, { $set: c }, { upsert: true });

@@ -1,98 +1,64 @@
 import { env } from "cloudflare:workers";
-import { canAdmin, canPartner, canVendor, getSessionUser, hasPermission, type Actor } from "../../../db/auth";
-import { ROLES, runMigrations } from "../../../db/migrations";
-import { listFoodOrdersForActor, transitionFoodOrder } from "../../../db/foodOrderBridge";
 
-type OrderRow = { id:string;reference:string;service:string;vendor:string;vendor_id:string;customer:string;customer_id:string;partner:string|null;partner_id:string|null;status:string;total:number;details:string;created_at:string;updated_at:string };
-type OfferRow = { id:string;vendor_id:string;vendor:string;title:string;code:string;discount_percent:number;min_order:number;active:number;created_at:string;updated_at:string };
-const COMMERCE = ["Food","Grocery","Vegetables","Mart"];
-const SERVICES = [...COMMERCE,"Bike Taxi","Parcel"];
+// The vendor / delivery-partner / admin portal now reads and writes MongoDB,
+// which cannot run on the Cloudflare Workers runtime this app is served from
+// (the Atlas Data API was retired in September 2025, and the MongoDB driver
+// needs net.Socket). The portal logic therefore lives in the Node service in
+// server/, and this route forwards to it.
+//
+// Keeping the path identical means the existing UI needed no changes, and no
+// D1 query remains anywhere in the portal path.
 
-function api(data:unknown,status=200,message:string|null=null){return Response.json(status<400?{success:true,data,message}:{success:false,error:data},{status});}
+const DEFAULT_API = "http://localhost:3000";
 
-async function audit(user:Actor,action:string,entityType:string,entityId:string,before:unknown,after:unknown){await env.DB.prepare("INSERT INTO audit_logs(id,actor_id,actor_role,action,entity_type,entity_id,before_json,after_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(),user.id,user.role,action,entityType,entityId,before?JSON.stringify(before):null,after?JSON.stringify(after):null,new Date().toISOString()).run();}
-
-async function snapshot(user:Actor){
-  const db=env.DB;
-  const orderQuery=user.role==="CUSTOMER"
-    ?db.prepare("SELECT * FROM orders WHERE customer_id=? ORDER BY created_at DESC").bind(user.id)
-    :canVendor(user)
-      ?db.prepare("SELECT * FROM orders WHERE vendor_id=? ORDER BY created_at DESC").bind(user.id)
-      :canPartner(user)
-        ?db.prepare("SELECT * FROM orders WHERE partner_id=? OR (partner_id IS NULL AND status IN ('READY_FOR_PICKUP','REQUESTED','CREATED')) ORDER BY created_at DESC").bind(user.id)
-        :db.prepare("SELECT * FROM orders ORDER BY created_at DESC");
-  const productQuery=user.role==="CUSTOMER"
-    ?db.prepare("SELECT p.* FROM products p WHERE p.stock>0 AND COALESCE((SELECT value FROM app_settings WHERE key='vendor_open:' || p.vendor_id),'true')='true' ORDER BY p.service,p.vendor,p.name")
-    :canVendor(user)
-      ?db.prepare("SELECT * FROM products WHERE vendor_id=? ORDER BY service,name").bind(user.id)
-      :db.prepare("SELECT * FROM products ORDER BY service,vendor,name");
-  const offerQuery=canVendor(user)
-    ?db.prepare("SELECT * FROM vendor_offers WHERE vendor_id=? ORDER BY created_at DESC").bind(user.id)
-    :canAdmin(user)
-      ?db.prepare("SELECT * FROM vendor_offers ORDER BY created_at DESC")
-      :null;
-  const [products,orders,services,pricing,settings,users,audits,offers]=await Promise.all([
-    productQuery.all(),orderQuery.all<OrderRow>(),db.prepare("SELECT * FROM service_config ORDER BY rowid").all(),db.prepare("SELECT * FROM pricing_rules").all(),db.prepare("SELECT * FROM app_settings WHERE key IN (?,?) OR key NOT LIKE '%:%'").bind(`partner_online:${user.id}`,`vendor_open:${user.id}`).all(),
-    canAdmin(user)?db.prepare("SELECT id,email,name,role,status,created_at FROM users ORDER BY created_at DESC LIMIT 200").all():Promise.resolve({results:[]}),
-    canAdmin(user)?db.prepare("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100").all():Promise.resolve({results:[]}),
-    offerQuery?offerQuery.all<OfferRow>():Promise.resolve({results:[]}),
-  ]);
-  const safeOrders=orders.results.map((row:OrderRow)=>{
-    const details=JSON.parse(row.details) as Record<string,unknown>;
-    if(user.role!=="CUSTOMER"&&!canAdmin(user))delete details.verificationCode;
-    return {...row,details};
-  });
-  // Orders placed from the mobile app live in `food_orders`; merge them in so
-  // vendors and partners see one queue regardless of where the order started.
-  const foodOrders=await listFoodOrdersForActor(db,user);
-  const mergedOrders=[...safeOrders,...foodOrders].sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
-  return {actor:user,products:products.results,orders:mergedOrders,offers:offers.results,services:services.results,pricing:pricing.results,settings:Object.fromEntries((settings.results as {key:string;value:string}[]).map((x)=>[x.key.startsWith("partner_online:")?"partner_online":x.key.startsWith("vendor_open:")?"vendor_open":x.key,x.value])),users:users.results,auditLogs:audits.results};
+function apiBase(): string {
+  const configured = (env as unknown as Record<string, unknown>).GOOCART_API_URL;
+  return (typeof configured === "string" && configured ? configured : DEFAULT_API).replace(/\/$/, "");
 }
 
-export async function GET(){try{await runMigrations(env.DB);const user=await getSessionUser(env.DB);if(!user)return api({code:"AUTH_REQUIRED",message:"Sign in to continue"},401);if(user.status!=="ACTIVE")return api({code:"ACCOUNT_DISABLED",message:"This account is not active"},403);return api(await snapshot(user));}catch(error){return api({code:"STATE_LOAD_FAILED",message:error instanceof Error?error.message:"Unable to load Goocart"},500);}}
+async function forward(request: Request, method: "GET" | "POST"): Promise<Response> {
+  const target = `${apiBase()}/api/goocart`;
 
-export async function POST(request:Request){try{await runMigrations(env.DB);const user=await getSessionUser(env.DB);if(!user)return api({code:"AUTH_REQUIRED",message:"Sign in to continue"},401);if(user.status!=="ACTIVE")return api({code:"ACCOUNT_DISABLED",message:"This account is not active"},403);const body=await request.json() as Record<string,unknown>;const action=String(body.action||"");const db=env.DB;
-  if(action==="product.create"){
-    if(!canVendor(user)&&!canAdmin(user))return api({code:"FORBIDDEN",message:"Vendor access required"},403);const service=String(body.service);const name=String(body.name||"").trim();const description=String(body.description||"").trim();const price=Number(body.price);const stock=Math.floor(Number(body.stock));if(!COMMERCE.includes(service)||name.length<2||description.length<3||!Number.isFinite(price)||price<=0||!Number.isInteger(stock)||stock<0)return api({code:"INVALID_PRODUCT",message:"Enter valid product details"},400);const vendorId=canVendor(user)?user.id:String(body.vendorId||user.id);const vendor=canVendor(user)?user.name:String(body.vendor||user.name);const id=crypto.randomUUID();await db.prepare("INSERT INTO products(id,service,vendor,vendor_id,name,description,price,stock,rating,eta) VALUES (?,?,?,?,?,?,?,?,0,?)").bind(id,service,vendor,vendorId,name,description,price,stock,String(body.eta||"30–45 min")).run();await audit(user,"product.create","product",id,null,{service,name,price,stock});return api(await snapshot(user),200,"Product created");
+  // Auth travels as a cookie from the browser; pass it through untouched so
+  // the Node service resolves the same session.
+  const headers = new Headers();
+  const cookie = request.headers.get("cookie");
+  const authorization = request.headers.get("authorization");
+  if (cookie) headers.set("cookie", cookie);
+  if (authorization) headers.set("authorization", authorization);
+  if (method === "POST") headers.set("content-type", "application/json");
+
+  try {
+    const upstream = await fetch(target, {
+      method,
+      headers,
+      body: method === "POST" ? await request.text() : undefined,
+    });
+
+    const body = await upstream.text();
+    const responseHeaders = new Headers({ "content-type": "application/json" });
+    const setCookie = upstream.headers.get("set-cookie");
+    if (setCookie) responseHeaders.append("set-cookie", setCookie);
+
+    return new Response(body, { status: upstream.status, headers: responseHeaders });
+  } catch (error) {
+    return Response.json(
+      {
+        success: false,
+        error: {
+          code: "API_UNREACHABLE",
+          message: `Could not reach the Goocart API at ${apiBase()}. Start it with: cd server && npm run dev`,
+        },
+      },
+      { status: 503 },
+    );
   }
-  if(action==="offer.create"){
-    if(!canVendor(user))return api({code:"FORBIDDEN",message:"Vendor access required"},403);const title=String(body.title||"").trim();const code=String(body.code||"").trim().toUpperCase().replace(/[^A-Z0-9]/g,"");const discountPercent=Math.floor(Number(body.discountPercent));const minOrder=Number(body.minOrder);if(title.length<3||code.length<3||code.length>16||discountPercent<1||discountPercent>60||!Number.isFinite(minOrder)||minOrder<0)return api({code:"INVALID_OFFER",message:"Enter a title, code, 1–60% discount and valid minimum order"},400);const id=crypto.randomUUID();const now=new Date().toISOString();try{await db.prepare("INSERT INTO vendor_offers(id,vendor_id,vendor,title,code,discount_percent,min_order,active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,1,?,?)").bind(id,user.id,user.name,title,code,discountPercent,minOrder,now,now).run();}catch{return api({code:"OFFER_CODE_EXISTS",message:"This offer code already exists for your store"},409);}await audit(user,"offer.create","vendor_offer",id,null,{title,code,discountPercent,minOrder});return api(await snapshot(user),200,"Offer published");
-  }
-  if(action==="offer.toggle"){
-    if(!canVendor(user))return api({code:"FORBIDDEN",message:"Vendor access required"},403);const id=String(body.id);const offer=await db.prepare("SELECT id,active FROM vendor_offers WHERE id=? AND vendor_id=?").bind(id,user.id).first<{id:string;active:number}>();if(!offer)return api({code:"OFFER_NOT_FOUND",message:"Offer not found"},404);const active=body.active?1:0;await db.prepare("UPDATE vendor_offers SET active=?,updated_at=? WHERE id=? AND vendor_id=?").bind(active,new Date().toISOString(),id,user.id).run();await audit(user,"offer.toggle","vendor_offer",id,{active:offer.active},{active});return api(await snapshot(user),200,active?"Offer activated":"Offer paused");
-  }
-  if(action==="order.create"){
-    if(user.role!=="CUSTOMER")return api({code:"FORBIDDEN",message:"Customer access required"},403);const raw=Array.isArray(body.items)?body.items as {productId:string;qty:number}[]:[];if(!raw.length)return api({code:"EMPTY_CART",message:"Your cart is empty"},400);const items:{id:string;name:string;vendor:string;vendor_id:string;service:string;price:number;stock:number;qty:number}[]=[];for(const entry of raw){const product=await db.prepare("SELECT id,name,vendor,vendor_id,service,price,stock FROM products WHERE id=?").bind(entry.productId).first<Omit<typeof items[number],"qty">>();const qty=Math.max(1,Math.floor(Number(entry.qty)||1));if(!product||product.stock<qty)return api({code:"OUT_OF_STOCK",message:`${product?.name||"Item"} is unavailable`},409);items.push({...product,qty});}if(items.some((x)=>x.vendor_id!==items[0].vendor_id))return api({code:"MULTI_VENDOR_CART",message:"Use one store per checkout"},409);const enabled=await db.prepare("SELECT enabled FROM service_config WHERE service=?").bind(items[0].service).first<{enabled:number}>();if(!enabled?.enabled)return api({code:"SERVICE_UNAVAILABLE",message:"This service is temporarily unavailable"},409);const availability=await db.prepare("SELECT value FROM app_settings WHERE key=?").bind(`vendor_open:${items[0].vendor_id}`).first<{value:string}>();if(availability?.value==="false")return api({code:"VENDOR_CLOSED",message:"This store is not accepting orders right now"},409);const subtotal=items.reduce((sum,x)=>sum+x.price*x.qty,0);const total=subtotal+34;const id=crypto.randomUUID();const now=new Date().toISOString();const verificationCode=String(crypto.getRandomValues(new Uint16Array(1))[0]%10000).padStart(4,"0");const prefix:Record<string,string>={Food:"FD",Grocery:"GR",Vegetables:"VG",Mart:"MT"};const reference=`GOO-${prefix[items[0].service]}-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;const batch=items.map((x)=>db.prepare("UPDATE products SET stock=stock-? WHERE id=? AND stock>=?").bind(x.qty,x.id,x.qty));batch.push(db.prepare("INSERT INTO orders(id,reference,service,vendor,vendor_id,customer,customer_id,partner,partner_id,status,total,details,created_at,updated_at) VALUES (?,?,?,?,?,?,?,NULL,NULL,'PLACED',?,?,?,?)").bind(id,reference,items[0].service,items[0].vendor,items[0].vendor_id,user.name,user.id,total,JSON.stringify({items:items.map((x)=>({name:x.name,qty:x.qty,price:x.price})),subtotal,fees:34,address:String(body.address||"Home"),verificationCode}),now,now));await db.batch(batch);await audit(user,"order.create","order",id,null,{reference,total});return api(await snapshot(user),200,"Order placed");
-  }
-  if(action==="job.create"){
-    if(user.role!=="CUSTOMER")return api({code:"FORBIDDEN",message:"Customer access required"},403);const service=String(body.service);if(!["Bike Taxi","Parcel"].includes(service))return api({code:"INVALID_SERVICE",message:"Invalid booking service"},400);const pickup=String(body.pickup||"").trim();const drop=String(body.drop||"").trim();if(pickup.length<3||drop.length<3)return api({code:"INVALID_LOCATION",message:"Pickup and drop are required"},400);const rule=await db.prepare("SELECT * FROM pricing_rules WHERE service=?").bind(service).first<{base_fare:number;per_km:number;platform_fee:number}>();if(!rule)return api({code:"PRICING_UNAVAILABLE",message:"This service is not yet priced for your area"},409);const distance=Math.max(1,Math.min(30,Number(body.distance)||4.2));const total=Math.round(rule.base_fare+rule.per_km*distance+rule.platform_fee);const id=crypto.randomUUID();const now=new Date().toISOString();const verificationCode=String(crypto.getRandomValues(new Uint16Array(1))[0]%10000).padStart(4,"0");const reference=`GOO-${service==="Bike Taxi"?"RIDE":"PCL"}-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;const status=service==="Bike Taxi"?"REQUESTED":"CREATED";const details=service==="Bike Taxi"?{pickup,drop,distance,verificationCode}:{pickup,drop,distance,packageType:String(body.packageType||"Small Package"),verificationCode};await db.prepare("INSERT INTO orders(id,reference,service,vendor,vendor_id,customer,customer_id,partner,partner_id,status,total,details,created_at,updated_at) VALUES (?,?,?,?,?,?,?,NULL,NULL,?,?,?,?,?)").bind(id,reference,service,service==="Bike Taxi"?"Goocart Bike":"Goocart Parcel","platform",user.name,user.id,status,total,JSON.stringify(details),now,now).run();await audit(user,"job.create",service,id,null,{reference,total});return api(await snapshot(user),200,`${service} booked`);
-  }
-  if(action==="order.transition"){
-    const id=String(body.id);const to=String(body.to);
-    const bridged=await transitionFoodOrder(db,user,id,to,String(body.code||""));
-    if(bridged){if(!bridged.ok)return api({code:bridged.code,message:bridged.message},bridged.status);await audit(user,"order.transition","food_order",id,null,{status:to});return api(await snapshot(user),200,"Status updated");}
-    const order=await db.prepare("SELECT * FROM orders WHERE id=?").bind(id).first<OrderRow>();if(!order)return api({code:"ORDER_NOT_FOUND",message:"Order not found"},404);let group="";if(canVendor(user)&&order.vendor_id===user.id)group="vendor";else if(canPartner(user)&&(order.partner_id===user.id||!order.partner_id))group="partner";else if(canAdmin(user))group="admin";else return api({code:"FORBIDDEN",message:"This order is outside your scope"},403);const allowed:Record<string,Record<string,string[]>>={vendor:{PLACED:["VENDOR_ACCEPTED","VENDOR_REJECTED"],VENDOR_ACCEPTED:["PREPARING"],PREPARING:["READY_FOR_PICKUP"]},partner:{READY_FOR_PICKUP:["DELIVERY_PARTNER_ASSIGNED"],DELIVERY_PARTNER_ASSIGNED:["PICKED_UP"],PICKED_UP:["ON_THE_WAY"],ON_THE_WAY:["DELIVERED"],REQUESTED:["DRIVER_ASSIGNED"],DRIVER_ASSIGNED:["RIDE_STARTED"],RIDE_STARTED:["COMPLETED"],CREATED:["PARTNER_ASSIGNED"],PARTNER_ASSIGNED:["PICKED_UP"],IN_TRANSIT:["DELIVERED"]},admin:{PLACED:["CANCELLED_BY_ADMIN"],VENDOR_ACCEPTED:["CANCELLED_BY_ADMIN"],PREPARING:["CANCELLED_BY_ADMIN"],READY_FOR_PICKUP:["CANCELLED_BY_ADMIN"],REQUESTED:["CANCELLED_BY_ADMIN"],CREATED:["CANCELLED_BY_ADMIN"]}};if(!allowed[group]?.[order.status]?.includes(to))return api({code:"INVALID_TRANSITION",message:`${order.status} cannot move to ${to}`},409);const assigned=group==="partner"&&["DELIVERY_PARTNER_ASSIGNED","DRIVER_ASSIGNED","PARTNER_ASSIGNED"].includes(to);if(assigned){const online=await db.prepare("SELECT value FROM app_settings WHERE key=?").bind(`partner_online:${user.id}`).first<{value:string}>();if(online?.value!=="true")return api({code:"PARTNER_OFFLINE",message:"Go online before accepting a request"},409);const active=await db.prepare("SELECT id FROM orders WHERE partner_id=? AND status NOT IN ('DELIVERED','COMPLETED','CANCELLED_BY_ADMIN','VENDOR_REJECTED') LIMIT 1").bind(user.id).first();if(active)return api({code:"ACTIVE_TASK_EXISTS",message:"Complete your current task before accepting another"},409);}if(group==="partner"&&["RIDE_STARTED","DELIVERED"].includes(to)){const details=JSON.parse(order.details) as Record<string,unknown>;if(String(body.code||"")!==String(details.verificationCode||""))return api({code:"INVALID_VERIFICATION_CODE",message:"Enter the customer’s correct 4-digit verification code"},409);}const result=assigned?await db.prepare("UPDATE orders SET status=?,partner=?,partner_id=?,updated_at=? WHERE id=? AND status=? AND partner_id IS NULL").bind(to,user.name,user.id,new Date().toISOString(),id,order.status).run():await db.prepare("UPDATE orders SET status=?,updated_at=? WHERE id=? AND status=?").bind(to,new Date().toISOString(),id,order.status).run();if(!result.meta.changes)return api({code:"ORDER_ALREADY_UPDATED",message:"This request was already updated. Refresh and try another."},409);await audit(user,"order.transition","order",id,{status:order.status},{status:to});return api(await snapshot(user),200,to==="DELIVERED"||to==="COMPLETED"?"Task completed":"Status updated");
-  }
-  if(action==="stock.adjust"){
-    if(!canVendor(user)&&!canAdmin(user))return api({code:"FORBIDDEN",message:"Inventory access required"},403);const id=String(body.id);const product=await db.prepare("SELECT id,vendor_id,stock FROM products WHERE id=?").bind(id).first<{id:string;vendor_id:string;stock:number}>();if(!product||canVendor(user)&&product.vendor_id!==user.id)return api({code:"PRODUCT_NOT_FOUND",message:"Product not found"},404);const amount=Math.max(-100,Math.min(100,Math.floor(Number(body.amount)||0)));await db.prepare("UPDATE products SET stock=MAX(0,stock+?) WHERE id=?").bind(amount,id).run();await audit(user,"stock.adjust","product",id,{stock:product.stock},{stock:Math.max(0,product.stock+amount)});return api(await snapshot(user),200,"Inventory updated");
-  }
-  if(action==="service.toggle"){
-    if(!await hasPermission(db,user.role,"service.manage"))return api({code:"FORBIDDEN",message:"Admin access required"},403);const service=String(body.service);if(!SERVICES.includes(service))return api({code:"INVALID_SERVICE",message:"Unknown service"},400);const before=await db.prepare("SELECT enabled FROM service_config WHERE service=?").bind(service).first();await db.prepare("UPDATE service_config SET enabled=? WHERE service=?").bind(body.enabled?1:0,service).run();await audit(user,"service.toggle","service",service,before,{enabled:Boolean(body.enabled)});return api(await snapshot(user),200,"Service availability updated");
-  }
-  if(action==="pricing.update"){
-    if(!await hasPermission(db,user.role,"pricing.manage"))return api({code:"FORBIDDEN",message:"Admin access required"},403);const service=String(body.service);const baseFare=Number(body.baseFare),perKm=Number(body.perKm),platformFee=Number(body.platformFee);if(!["Bike Taxi","Parcel"].includes(service)||[baseFare,perKm,platformFee].some((x)=>!Number.isFinite(x)||x<0))return api({code:"INVALID_PRICING",message:"Enter valid non-negative pricing"},400);const before=await db.prepare("SELECT * FROM pricing_rules WHERE service=?").bind(service).first();await db.prepare("INSERT INTO pricing_rules(service,base_fare,per_km,platform_fee) VALUES (?,?,?,?) ON CONFLICT(service) DO UPDATE SET base_fare=excluded.base_fare,per_km=excluded.per_km,platform_fee=excluded.platform_fee").bind(service,baseFare,perKm,platformFee).run();await audit(user,"pricing.update","pricing",service,before,{baseFare,perKm,platformFee});return api(await snapshot(user),200,"Pricing updated");
-  }
-  if(action==="partner.toggle"){
-    if(!canPartner(user))return api({code:"FORBIDDEN",message:"Partner access required"},403);const key=`partner_online:${user.id}`;await db.prepare("INSERT INTO app_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(key,body.value?"true":"false").run();return api(await snapshot(user),200,body.value?"You are online":"You are offline");
-  }
-  if(action==="vendor.toggle"){
-    if(!canVendor(user))return api({code:"FORBIDDEN",message:"Vendor access required"},403);const key=`vendor_open:${user.id}`;await db.prepare("INSERT INTO app_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(key,body.value?"true":"false").run();await audit(user,"vendor.availability","vendor",user.id,null,{open:Boolean(body.value)});return api(await snapshot(user),200,body.value?"Store opened":"Store closed");
-  }
-  if(action==="user.update"){
-    if(!await hasPermission(db,user.role,"user.manage"))return api({code:"FORBIDDEN",message:"Admin access required"},403);const id=String(body.id);const role=String(body.role);const status=String(body.status);const validRoles=ROLES.map((r)=>r.id);if(!validRoles.includes(role)||!["ACTIVE","SUSPENDED"].includes(status))return api({code:"INVALID_USER_UPDATE",message:"Invalid role or status"},400);const before=await db.prepare("SELECT role,status FROM users WHERE id=?").bind(id).first();await db.prepare("UPDATE users SET role=?,status=?,updated_at=? WHERE id=?").bind(role,status,new Date().toISOString(),id).run();await audit(user,"user.update","user",id,before,{role,status});return api(await snapshot(user),200,"User access updated");
-  }
-  if(action==="migrations.run"){
-    if(!canAdmin(user))return api({code:"FORBIDDEN",message:"Admin access required"},403);const applied=await runMigrations(db);if(applied.length)await audit(user,"migrations.run","schema",applied.join(","),null,{applied});return api({...await snapshot(user),migrationsApplied:applied},200,applied.length?`Applied migrations: ${applied.join(", ")}`:"Schema already up to date");
-  }
-  return api({code:"UNKNOWN_ACTION",message:"Action is not supported"},400);
-}catch(error){return api({code:"ACTION_FAILED",message:error instanceof Error?error.message:"Action failed"},500);}}
+}
+
+export async function GET(request: Request) {
+  return forward(request, "GET");
+}
+
+export async function POST(request: Request) {
+  return forward(request, "POST");
+}

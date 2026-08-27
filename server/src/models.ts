@@ -218,6 +218,74 @@ const auditLogSchema = new Schema(
 );
 const counterSchema = new Schema({ _id: { type: String }, seq: { type: Number, default: 0 } }, { versionKey: false });
 
+// --- Multi-service commerce (vendor/admin portal) --------------------------
+// Distinct from the food catalog above: these back the Grocery, Vegetables,
+// Mart, Bike Taxi and Parcel services the web portal manages, which use a
+// flat product/order shape rather than the richer restaurant menu model.
+
+const productSchema = new Schema(
+  {
+    service: { type: String, required: true, index: true },
+    vendorId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    vendorName: { type: String, required: true },
+    name: { type: String, required: true },
+    description: { type: String, default: "" },
+    price: { type: Number, required: true, min: 0 },
+    stock: { type: Number, required: true, default: 0, min: 0 },
+    rating: { type: Number, default: 0 },
+    eta: { type: String, default: "30–45 min" },
+  },
+  opts,
+);
+
+const serviceOrderSchema = new Schema(
+  {
+    reference: { type: String, required: true, unique: true },
+    service: { type: String, required: true, index: true },
+    vendorId: { type: Schema.Types.ObjectId, default: null, index: true },
+    vendorName: { type: String, default: "" },
+    customerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    customerName: { type: String, default: "" },
+    partnerId: { type: Schema.Types.ObjectId, default: null, index: true },
+    partnerName: { type: String, default: null },
+    status: { type: String, required: true, index: true },
+    total: { type: Number, required: true },
+    details: { type: Schema.Types.Mixed, default: {} },
+  },
+  opts,
+);
+serviceOrderSchema.index({ createdAt: -1 });
+
+const vendorOfferSchema = new Schema(
+  {
+    vendorId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    vendorName: { type: String, default: "" },
+    title: { type: String, required: true },
+    code: { type: String, required: true },
+    discountPercent: { type: Number, required: true, min: 1, max: 60 },
+    minOrder: { type: Number, required: true, min: 0 },
+    active: { type: Boolean, default: true },
+  },
+  opts,
+);
+// A code is unique per vendor, not globally — two stores may both run "SAVE10".
+vendorOfferSchema.index({ vendorId: 1, code: 1 }, { unique: true });
+
+const pricingRuleSchema = new Schema(
+  {
+    _id: { type: String },
+    baseFare: { type: Number, required: true, min: 0 },
+    perKm: { type: Number, required: true, min: 0 },
+    platformFee: { type: Number, required: true, min: 0 },
+  },
+  { versionKey: false, timestamps: true },
+);
+
+export const Product = model("Product", productSchema);
+export const ServiceOrder = model("ServiceOrder", serviceOrderSchema);
+export const VendorOffer = model("VendorOffer", vendorOfferSchema);
+export const PricingRule = model("PricingRule", pricingRuleSchema);
+
 export const User = model("User", userSchema);
 export const Session = model("Session", sessionSchema);
 export const Otp = model("Otp", otpSchema);

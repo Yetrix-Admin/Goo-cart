@@ -899,3 +899,10 @@ export const SEED_COUPONS = [
     "active": true
   }
 ];
+
+// Bike Taxi and Parcel fares. Admin-editable from the portal; never hardcoded
+// in any client.
+export const SEED_PRICING = [
+  { service: "Bike Taxi", baseFare: 25, perKm: 8, platformFee: 4 },
+  { service: "Parcel", baseFare: 35, perKm: 10, platformFee: 5 },
+];
