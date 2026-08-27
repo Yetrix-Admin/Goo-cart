@@ -20,7 +20,8 @@ type OrderState = {
   createOrder: (input: CreateOrderInput) => Promise<FoodOrder>;
   getOrder: (id: string) => FoodOrder | undefined;
   fetchOrder: (id: string) => Promise<FoodOrder | null>;
-  transition: (id: string, to: FoodOrderStatus, otp?: string) => Promise<FoodOrder>;
+  transition: (id: string, to: FoodOrderStatus, code?: string) => Promise<FoodOrder>;
+  cancelOrder: (id: string, reason?: string) => Promise<FoodOrder>;
   clear: () => void;
 };
 
@@ -75,8 +76,14 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     }
   },
 
-  transition: async (id, to, otp) => {
-    const data = await apiPost<{ order: FoodOrder }>(`/api/v1/orders/${id}/transition`, { to, otp });
+  transition: async (id, to, code) => {
+    const data = await apiPost<{ order: FoodOrder }>(`/api/v1/orders/${id}/transition`, { to, code });
+    set({ orders: get().orders.map((o) => (o.id === id ? data.order : o)) });
+    return data.order;
+  },
+
+  cancelOrder: async (id, reason) => {
+    const data = await apiPost<{ order: FoodOrder }>(`/api/v1/orders/${id}/cancel`, { reason });
     set({ orders: get().orders.map((o) => (o.id === id ? data.order : o)) });
     return data.order;
   },

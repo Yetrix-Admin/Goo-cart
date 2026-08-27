@@ -3,9 +3,19 @@ import { Address } from "@/types";
 import { colors, radius, spacing, typography } from "@/theme";
 import { Icon } from "@/components/Icon";
 
-export function AddressCard({ address, selected, onPress }: { address: Address; selected?: boolean; onPress?: () => void }) {
+export function AddressCard({
+  address,
+  selected,
+  onPress,
+  onLongPress,
+}: {
+  address: Address;
+  selected?: boolean;
+  onPress?: () => void;
+  onLongPress?: () => void;
+}) {
   return (
-    <Pressable onPress={onPress} style={[styles.row, selected && styles.rowSelected]}>
+    <Pressable onPress={onPress} onLongPress={onLongPress} style={[styles.row, selected && styles.rowSelected]}>
       <View style={styles.icon}>
         <Text style={styles.iconText}>{address.label[0]}</Text>
       </View>

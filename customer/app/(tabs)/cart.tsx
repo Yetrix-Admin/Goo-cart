@@ -12,6 +12,7 @@ import { Icon } from "@/components/Icon";
 import { useCartBill, useCartStore } from "@/store/useCartStore";
 import { validateCoupon } from "@/services/CouponService";
 import { useCatalogStore } from "@/store/useCatalogStore";
+import { useAuthStore } from "@/store/useAuthStore";
 import { DELIVERY_INSTRUCTIONS } from "@/types";
 
 const TIP_OPTIONS = [10, 20, 30];
@@ -31,9 +32,21 @@ export default function CartScreen() {
   const setTip = useCartStore((s) => s.setTip);
 
   const coupons = useCatalogStore((s) => s.coupons);
+  const user = useAuthStore((s) => s.user);
   const [couponInput, setCouponInput] = useState("");
   const [couponError, setCouponError] = useState("");
   const [customTip, setCustomTip] = useState("");
+
+  // Guests can build a full cart; signing in is only required the moment
+  // they try to move past it toward actually placing an order (spec
+  // section 3). The cart itself is untouched either way.
+  const proceedToCheckout = () => {
+    if (!user) {
+      router.push({ pathname: "/login", params: { returnTo: "/checkout" } });
+      return;
+    }
+    router.push("/checkout");
+  };
 
   const submitCoupon = () => {
     if (!couponInput.trim()) return;
@@ -181,7 +194,7 @@ export default function CartScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <PrimaryButton label={`Proceed to Checkout • ₹${bill.total}`} onPress={() => router.push("/checkout")} />
+        <PrimaryButton label={`Proceed to Checkout • ₹${bill.total}`} onPress={proceedToCheckout} />
       </View>
     </SafeAreaView>
   );

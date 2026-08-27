@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -10,17 +10,29 @@ import { TrackingMap } from "@/components/TrackingMap";
 import { colors, radius, spacing, typography } from "@/theme";
 import { Icon } from "@/components/Icon";
 import { useOrderStore } from "@/store/useOrderStore";
+import { useAuthStore } from "@/store/useAuthStore";
+import { getSocket } from "@/services/socket";
 import { ORDER_STATUS_LABEL } from "@/constants/orderStatus";
 
 const POLL_INTERVAL_MS = 5000;
+// A customer may cancel any time before the kitchen starts preparing (spec
+// section 44) — matched against the same status set the backend enforces in
+// server/src/lib/orderState.ts's "customer" transition group.
+const CUSTOMER_CANCELLABLE_STATUSES = ["PLACED", "VENDOR_ACCEPTED"];
 
 export default function OrderTrackingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const order = useOrderStore((s) => (id ? s.getOrder(id) : undefined));
   const fetchOrder = useOrderStore((s) => s.fetchOrder);
+  const cancelOrder = useOrderStore((s) => s.cancelOrder);
+  const token = useAuthStore((s) => s.token);
   const [notFound, setNotFound] = useState(false);
-  // Render must stay pure, so "now" is state that ticks rather than a
-  // Date.now() call during render.
+  const [cancelling, setCancelling] = useState(false);
+  // The only source of the rider marker: a real GPS fix relayed from the
+  // delivery partner's device over the realtime channel. Nothing here
+  // simulates or interpolates movement — if no fix has arrived yet, there is
+  // simply no marker (see TrackingMap's "waiting for live location" state).
+  const [riderPosition, setRiderPosition] = useState<{ latitude: number; longitude: number } | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -28,8 +40,10 @@ export default function OrderTrackingScreen() {
     return () => clearInterval(timer);
   }, []);
 
-  // Status advances because a vendor or delivery partner actually acted on the
-  // order server-side; the app polls rather than simulating any progression.
+  // Status advances because a vendor or delivery partner actually acted on
+  // the order server-side. The realtime socket below delivers this near-
+  // instantly; polling stays on as a resilient fallback if a push is missed
+  // (a dropped connection, a backgrounded app waking back up, etc).
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
@@ -50,19 +64,57 @@ export default function OrderTrackingScreen() {
     };
   }, [id, fetchOrder]);
 
-  const riderPosition = useMemo(() => {
-    if (!order || order.status !== "ON_THE_WAY") return null;
-    const startedAt = order.statusHistory.find((e) => e.status === "ON_THE_WAY")?.at;
-    if (!startedAt) return null;
-    // Interpolate the marker between restaurant and drop over the remaining ETA.
-    const legMs = Math.max(1, order.estimatedDeliveryMinutes) * 60 * 1000 * 0.4;
-    const fraction = Math.min(1, (now - new Date(startedAt).getTime()) / legMs);
-    const drop = order.deliveryAddress;
-    return {
-      latitude: order.restaurantLatitude + ((drop?.latitude ?? order.restaurantLatitude) - order.restaurantLatitude) * fraction,
-      longitude: order.restaurantLongitude + ((drop?.longitude ?? order.restaurantLongitude) - order.restaurantLongitude) * fraction,
+  useEffect(() => {
+    if (!id || !token) return;
+    const socket = getSocket(token);
+    if (!socket) return;
+
+    socket.emit("subscribe:order", id);
+
+    const onUpdate = (payload: { orderId: string }) => {
+      if (payload.orderId === id) void fetchOrder(id);
     };
-  }, [order, now]);
+    const onLocation = (payload: { orderId: string; latitude: number; longitude: number }) => {
+      if (payload.orderId === id) setRiderPosition({ latitude: payload.latitude, longitude: payload.longitude });
+    };
+
+    socket.on("order:update", onUpdate);
+    socket.on("order:location", onLocation);
+
+    return () => {
+      socket.emit("unsubscribe:order", id);
+      socket.off("order:update", onUpdate);
+      socket.off("order:location", onLocation);
+    };
+  }, [id, token, fetchOrder]);
+
+  // A newly-assigned partner (or a screen re-entered mid-delivery) has no
+  // live fix yet until their next GPS beat — reset so a stale rider from a
+  // previous order/partner never lingers on screen.
+  useEffect(() => {
+    setRiderPosition(null);
+  }, [order?.deliveryPartner?.id]);
+
+  const confirmCancel = () => {
+    if (!id) return;
+    Alert.alert("Cancel order?", "This cannot be undone.", [
+      { text: "Keep order", style: "cancel" },
+      {
+        text: "Cancel order",
+        style: "destructive",
+        onPress: async () => {
+          setCancelling(true);
+          try {
+            await cancelOrder(id);
+          } catch (e) {
+            Alert.alert("Couldn't cancel", e instanceof Error ? e.message : "Please try again.");
+          } finally {
+            setCancelling(false);
+          }
+        },
+      },
+    ]);
+  };
 
   if (notFound && !order) {
     return (
@@ -158,6 +210,10 @@ export default function OrderTrackingScreen() {
             <View style={styles.timelineCard}>
               <OrderStatusTimeline status={order.status} />
             </View>
+
+            {CUSTOMER_CANCELLABLE_STATUSES.includes(order.status) ? (
+              <PrimaryButton label={cancelling ? "Cancelling…" : "Cancel Order"} variant="outline" onPress={confirmCancel} disabled={cancelling} />
+            ) : null}
           </>
         )}
       </ScrollView>

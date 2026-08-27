@@ -1,4 +1,5 @@
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { Platform } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import { colors, radius, spacing } from "@/theme";
 
@@ -11,6 +12,11 @@ type Props = {
 // Native implementation (Android/iOS via Expo Go). react-native-maps has no
 // web target, so TrackingMap.web.tsx provides the web fallback — Metro picks
 // whichever file matches the bundling platform automatically.
+//
+// The rider marker only ever reflects a real GPS fix relayed over the
+// realtime channel from the delivery partner's device (see
+// server/src/routes/partner.ts POST /location and useOrderTracking.ts on the
+// customer side) — nothing here interpolates or simulates movement.
 export function TrackingMap({ restaurant, destination, rider }: Props) {
   return (
     <View style={styles.wrap}>
@@ -23,9 +29,11 @@ export function TrackingMap({ restaurant, destination, rider }: Props) {
         <Marker coordinate={destination} title="You" pinColor={colors.success} />
         {rider ? <Marker coordinate={rider} title={rider.name} pinColor={colors.dark} /> : null}
       </MapView>
-      <View style={styles.badge}>
-        <Text style={styles.badgeText}>DEMO TRACKING</Text>
-      </View>
+      {!rider ? (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>WAITING FOR LIVE LOCATION</Text>
+        </View>
+      ) : null}
     </View>
   );
 }

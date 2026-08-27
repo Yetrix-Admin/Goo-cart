@@ -15,12 +15,13 @@ export default function AccountScreen() {
   const clearCart = useCartStore((s) => s.clear);
 
   const notAvailableYet = (label: string) => Alert.alert(label, `${label} is coming in a later build phase.`);
+  const requireSignIn = (destination: string) => router.push({ pathname: "/login", params: { returnTo: destination } });
 
   const rows: Row[] = [
-    { label: "My Orders", onPress: () => router.push("/(tabs)/activity") },
+    { label: "My Orders", onPress: () => (user ? router.push("/(tabs)/activity") : requireSignIn("/(tabs)/activity")) },
     { label: "My Rides", onPress: () => notAvailableYet("My Rides") },
     { label: "My Parcels", onPress: () => notAvailableYet("My Parcels") },
-    { label: "Saved Addresses", onPress: () => router.push("/checkout/address") },
+    { label: "Saved Addresses", onPress: () => (user ? router.push("/checkout/address") : requireSignIn("/checkout/address")) },
     { label: "Favorites", onPress: () => router.push("/favorites") },
     { label: "Payments", onPress: () => notAvailableYet("Payments") },
     { label: "Goocart Wallet", onPress: () => notAvailableYet("Goocart Wallet") },
@@ -50,8 +51,13 @@ export default function AccountScreen() {
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{(user?.name ?? "G").slice(0, 2).toUpperCase()}</Text>
           </View>
-          <Text style={typography.h1}>{user?.name ?? "Goocart Customer"}</Text>
-          <Text style={styles.copy}>{user ? (user.isDemo ? "Demo account" : `+91 ${user.phone}`) : " "}</Text>
+          <Text style={typography.h1}>{user?.name ?? "Browsing as guest"}</Text>
+          <Text style={styles.copy}>{user ? (user.isDemo ? "Demo account" : user.phone ? `+91 ${user.phone}` : user.email) : "Sign in to place orders and track deliveries"}</Text>
+          {!user ? (
+            <Pressable onPress={() => router.push({ pathname: "/login", params: { returnTo: "/(tabs)/account" } })} style={styles.signInButton}>
+              <Text style={styles.signInButtonText}>Sign in</Text>
+            </Pressable>
+          ) : null}
           {location ? (
             <Pressable onPress={() => router.push("/location")}>
               <Text style={styles.changeLocation}>
@@ -70,9 +76,11 @@ export default function AccountScreen() {
           ))}
         </View>
 
-        <Pressable style={styles.logout} onPress={confirmLogout}>
-          <Text style={styles.logoutText}>Log out</Text>
-        </Pressable>
+        {user ? (
+          <Pressable style={styles.logout} onPress={confirmLogout}>
+            <Text style={styles.logoutText}>Log out</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -94,6 +102,8 @@ const styles = StyleSheet.create({
   avatarText: { color: colors.white, fontWeight: "800", fontSize: 20 },
   copy: { ...typography.body, color: colors.muted },
   changeLocation: { ...typography.captionStrong, color: colors.primary, marginTop: spacing.xs },
+  signInButton: { backgroundColor: colors.dark, borderRadius: radius.md, paddingVertical: spacing.sm, paddingHorizontal: spacing.xl, marginTop: spacing.xs },
+  signInButtonText: { color: colors.white, fontWeight: "700" },
   list: { gap: 2, borderRadius: radius.md, overflow: "hidden", borderWidth: 1, borderColor: colors.border },
   row: {
     flexDirection: "row",

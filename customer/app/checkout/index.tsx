@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import { Redirect, router } from "expo-router";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { AddressCard } from "@/components/AddressCard";
 import { colors, radius, spacing, typography } from "@/theme";
 import { useCartBill, useCartItemCount, useCartStore } from "@/store/useCartStore";
 import { useAddressStore } from "@/store/useAddressStore";
+import { useAuthStore } from "@/store/useAuthStore";
 import { PaymentMethod, Restaurant } from "@/types";
 import { restaurantService } from "@/services/RestaurantService";
 
@@ -23,6 +24,7 @@ const PAYMENT_METHODS: { id: PaymentMethod; label: string }[] = [
 ];
 
 export default function CheckoutScreen() {
+  const user = useAuthStore((s) => s.user);
   const restaurantId = useCartStore((s) => s.restaurantId);
   const restaurantName = useCartStore((s) => s.restaurantName);
   const totalItems = useCartItemCount();
@@ -54,6 +56,11 @@ export default function CheckoutScreen() {
   }, [restaurantId]);
 
   const continueToPayment = () => router.push({ pathname: "/checkout/payment", params: { method } });
+
+  // Defensive: cart.tsx already gates entry to this screen, but a guest
+  // could still land here via a stale deep link or by signing out on the
+  // payment screen in another tab. Placing an order always requires auth.
+  if (!user) return <Redirect href={{ pathname: "/login", params: { returnTo: "/checkout" } }} />;
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>

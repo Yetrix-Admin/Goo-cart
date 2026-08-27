@@ -24,7 +24,7 @@ export function TrackingMap({ restaurant, rider }: Props) {
         </Text>
       ) : null}
       <View style={styles.badge}>
-        <Text style={styles.badgeText}>DEMO TRACKING</Text>
+        <Text style={styles.badgeText}>WEB PREVIEW</Text>
       </View>
     </View>
   );

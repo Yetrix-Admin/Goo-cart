@@ -14,7 +14,6 @@ export default function Splash() {
 
   const authHydrated = useAuthStore((s) => s.hasHydrated);
   const locationHydrated = useLocationStore((s) => s.hasHydrated);
-  const user = useAuthStore((s) => s.user);
   const selectedLocation = useLocationStore((s) => s.selected);
 
   useEffect(() => {
@@ -29,7 +28,9 @@ export default function Splash() {
 
   if (ready) {
     if (!selectedLocation) return <Redirect href="/location" />;
-    if (!user) return <Redirect href="/login" />;
+    // Guests browse freely — sign-in is only required later, at checkout,
+    // when there is an actual order to place. `user` being null here just
+    // means "browsing as guest", not "blocked".
     return <Redirect href="/(tabs)/home" />;
   }
 
