@@ -60,8 +60,26 @@ mobile/android/app/*.keystore
 mobile/**/*.keystore
 mobile/**/*.jks
 
+# --- Delivery Partner app (Expo) secrets -----------------------------------
+partner/.env
+partner/android/local.properties
+partner/android/gradle.properties
+partner/android/app/*.keystore
+partner/**/*.keystore
+partner/**/*.jks
+
+# --- Vendor app (Expo) secrets ----------------------------------------------
+vendor/.env
+vendor/android/local.properties
+vendor/android/gradle.properties
+vendor/android/app/*.keystore
+vendor/**/*.keystore
+vendor/**/*.jks
+
 # Machine-local IDE state
 mobile/.idea/
+partner/.idea/
+vendor/.idea/
 .idea/
 
 # --- Server secrets --------------------------------------------------------
