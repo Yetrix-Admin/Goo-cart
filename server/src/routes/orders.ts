@@ -1,6 +1,6 @@
 import { Router } from "express";
 import mongoose from "mongoose";
-import { AuditLog, Coupon, FoodItem, Order, Restaurant, User, nextSequence } from "../models.js";
+import { AuditLog, Coupon, FoodItem, Order, Restaurant, Setting, nextSequence } from "../models.js";
 import { calculateBill, type CouponRule } from "../lib/pricing.js";
 import { canTransition, generateOrderNumber, generateOtp, type OrderStatus } from "../lib/orderState.js";
 import { canAdmin, canPartner, canVendor, requireAuth, type AuthedRequest } from "../lib/auth.js";
@@ -188,6 +188,10 @@ ordersRouter.post("/:id/transition", requireAuth, async (req: AuthedRequest, res
 
     const claiming = group === "partner" && to === "DELIVERY_PARTNER_ASSIGNED";
     if (claiming) {
+      const online = await Setting.findById(`partner_online:${user._id}`).lean();
+      if (!online || String((online as any).value) !== "true") {
+        return res.status(409).json(fail("PARTNER_OFFLINE", "Go online before accepting a delivery"));
+      }
       const active = await Order.findOne({
         partnerId: user._id,
         status: { $nin: ["DELIVERED", "CANCELLED_BY_ADMIN", "CANCELLED_BY_CUSTOMER", "VENDOR_REJECTED"] },

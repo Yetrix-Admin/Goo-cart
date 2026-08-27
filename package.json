@@ -7,10 +7,10 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern server --ignore-pattern mobile --ignore-pattern customer --ignore-pattern vendor --ignore-pattern partner",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .atlas-tools --ignore-pattern server --ignore-pattern mobile --ignore-pattern customer --ignore-pattern vendor --ignore-pattern partner",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

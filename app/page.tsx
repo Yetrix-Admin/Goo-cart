@@ -100,7 +100,7 @@ function AdminVendors(){
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const load=useCallback(async()=>{try{const [r,v]=await Promise.all([adminApi<{restaurants:AdminRestaurant[]}>("/restaurants"),adminApi<{vendors:AdminVendorUser[]}>("/vendors")]);setRestaurants(r.restaurants);setVendors(v.vendors);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load vendors");}},[]);
-  useEffect(()=>{void load();},[load]);
+  useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
   const assign=async(restaurantId:string,userId:string)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/owner`,{method:"PATCH",body:JSON.stringify({userId:userId||null})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not assign owner");}finally{setBusy(false);}};
   return <WorkspacePage eyebrow="VENDOR ACCOUNTS" title="Restaurants & owners" copy="Link a vendor account to a restaurant so its menu shows up in the Vendor app.">
     {error&&<p className="auth-error">{error}</p>}

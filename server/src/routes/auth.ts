@@ -117,7 +117,7 @@ authRouter.post("/otp/verify", async (req, res) => {
       if (name.length < 2) return res.status(400).json(fail("INVALID_NAME", "Enter your full name"));
       user = await User.create({
         email: isEmail ? identifier : `pending-${Date.now()}@goocart.local`,
-        phone: isEmail ? null : identifier,
+        ...(!isEmail ? { phone: identifier } : {}),
         name,
         role: isEmail ? defaultRoleForEmail(identifier) : "CUSTOMER",
         status: "ACTIVE",

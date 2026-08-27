@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { spawn, execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = new URL("../", import.meta.url);
@@ -23,17 +24,13 @@ async function waitForServer(proc) {
 }
 
 test("server-renders the Goocart application shell and role split is correct", async (t) => {
-  // shell:true is required for npx to resolve on Windows (npx.cmd); every
-  // argument here is a fixed literal, not external input, so this is safe.
-  const server = spawn("npx", ["next", "start", "-p", String(PORT)], {
-    cwd: new URL(".", root),
-    shell: true,
+  const nextCli = fileURLToPath(new URL("node_modules/next/dist/bin/next", root));
+  const server = spawn(process.execPath, [nextCli, "start", "-p", String(PORT)], {
+    cwd: fileURLToPath(root),
     stdio: "ignore",
   });
   t.after(() => {
-    // On Windows, spawning with shell:true means server.pid is the shell's
-    // pid, not npx/next's — plain .kill() leaves the real server running.
-    // taskkill with /t kills the whole process tree.
+    // taskkill with /t also stops any worker child processes Next started.
     if (process.platform === "win32") {
       try {
         execFileSync("taskkill", ["/pid", String(server.pid), "/t", "/f"], { stdio: "ignore" });

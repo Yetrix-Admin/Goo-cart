@@ -118,24 +118,24 @@ def migrate(source: sqlite3.Connection, target: Any) -> dict[str, int]:
         existing = target.users.find_one({"email": row["email"].lower()}, {"_id": 1})
         oid = existing["_id"] if existing else stable_id("user", row["id"])
         user_ids[row["id"]] = oid
-        set_doc(
-            target.users,
-            {"_id": oid},
-            {
-                "legacyId": row["id"],
-                "email": row["email"].lower(),
-                "phone": row["phone"],
-                "passwordHash": row["password_hash"],
-                "name": row["name"],
-                "role": row["role"],
-                "status": row["status"],
-                "emailVerifiedAt": as_datetime(row["email_verified_at"]),
-                "phoneVerifiedAt": as_datetime(row["phone_verified_at"]),
-                "lastLoginAt": as_datetime(row["last_login_at"]),
-                "createdAt": as_datetime(row["created_at"]),
-                "updatedAt": as_datetime(row["updated_at"]),
-            },
-        )
+        user_values = {
+            "legacyId": row["id"],
+            "email": row["email"].lower(),
+            "passwordHash": row["password_hash"],
+            "name": row["name"],
+            "role": row["role"],
+            "status": row["status"],
+            "emailVerifiedAt": as_datetime(row["email_verified_at"]),
+            "phoneVerifiedAt": as_datetime(row["phone_verified_at"]),
+            "lastLoginAt": as_datetime(row["last_login_at"]),
+            "createdAt": as_datetime(row["created_at"]),
+            "updatedAt": as_datetime(row["updated_at"]),
+        }
+        if row["phone"]:
+            user_values["phone"] = row["phone"]
+        else:
+            target.users.update_one({"_id": oid}, {"$unset": {"phone": ""}})
+        set_doc(target.users, {"_id": oid}, user_values)
         written["users"] += 1
 
     permissions = {row["id"]: row["description"] for row in source_rows(source, "permissions")}

@@ -14,7 +14,9 @@ const opts = { timestamps: true, versionKey: false };
 const userSchema = new Schema(
   {
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    phone: { type: String, default: null },
+    // Leave absent for email-only accounts. A unique sparse index ignores a
+    // missing field, but MongoDB treats an explicit null as an indexed value.
+    phone: { type: String, default: undefined },
     passwordHash: { type: String, default: null },
     name: { type: String, required: true },
     role: { type: String, required: true, default: "CUSTOMER", index: true },
