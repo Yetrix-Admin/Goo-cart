@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: goo-cart
+    runtime: node
+    plan: free
+    # This repo's root builds a Cloudflare Worker (the admin portal) — the API
+    # lives in server/, so every command below runs from there.
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB
+        value: goocart
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: ADMIN_USER_EMAILS
+        sync: false
+      - key: VENDOR_USER_EMAILS
+        sync: false
+      - key: PARTNER_USER_EMAILS
+        sync: false

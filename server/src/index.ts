@@ -23,6 +23,22 @@ app.use(
   }),
 );
 app.use(express.json({ limit: "1mb" }));
+
+// Serverless platforms start a fresh process per cold start, so the database
+// connection is established on demand rather than once at boot. connectDb()
+// caches its promise, so a warm invocation reuses the existing pool.
+app.use(async (_req, res, next) => {
+  try {
+    await connectDb();
+    next();
+  } catch (error) {
+    console.error("MongoDB unreachable:", error instanceof Error ? error.message : error);
+    res.status(503).json(
+      fail("DATABASE_UNAVAILABLE", "Could not reach the database. Check MONGODB_URI and that this host's IP is allowed in Atlas -> Network Access."),
+    );
+  }
+});
+
 app.use(attachUser);
 
 // Liveness probe that also reports whether Mongo is actually reachable, so a
@@ -53,21 +69,25 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
   res.status(500).json(fail("INTERNAL_ERROR", err instanceof Error ? err.message : "Something went wrong"));
 });
 
-async function start() {
-  try {
-    console.log(`Connecting to MongoDB (database: ${dbName()}) ...`);
-    await connectDb();
-    console.log("MongoDB connected.");
-  } catch (e) {
-    console.error("Could not reach MongoDB:", e instanceof Error ? e.message : e);
-    console.error("Check MONGODB_URI in server/.env and that your IP is allowed in Atlas → Network Access.");
-    process.exit(1);
-  }
+// Exported for serverless hosts (Vercel), which import the app and handle
+// listening themselves. Calling app.listen() there would hang the function.
+export default app;
+
+// Only bind a port when started directly, e.g. `npm run dev` or `npm start`.
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+
+if (!isServerless) {
+  connectDb()
+    .then(() => console.log(`MongoDB connected (database: ${dbName()}).`))
+    .catch((e) => {
+      // Log loudly but keep serving: /health then reports the real state
+      // instead of the process vanishing with no explanation.
+      console.error("Could not reach MongoDB:", e instanceof Error ? e.message : e);
+      console.error("Check MONGODB_URI in server/.env and that your IP is allowed in Atlas -> Network Access.");
+    });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Goocart API listening on http://0.0.0.0:${PORT}`);
     console.log(`Health check: http://localhost:${PORT}/health`);
   });
 }
-
-void start();
