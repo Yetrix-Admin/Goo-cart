@@ -11,7 +11,7 @@ type Snapshot = { actor:PlatformUser; products:Product[]; orders:Order[]; offers
 type ApiResult = { success:boolean; data?:Snapshot; error?:{code?:string;message:string}; message?:string|null };
 type ErrorState = { code:string; message:string };
 
-const adminNav:string[] = ["Dashboard","Live Operations","Orders","Rides","Parcels","Vendors","Delivery Partners","Customers","Catalog","Finance","Support","Reports","Settings"];
+const adminNav:string[] = ["Dashboard","Live Orders","Live Operations","Orders","Rides","Parcels","Vendors","Delivery Partners","Customers","Catalog","Finance","Support","Reports","Settings"];
 const commerce:Service[] = ["Food","Grocery","Vegetables","Mart"];
 const money = (value:number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
 const label = (value:string) => value.replaceAll("_"," ").toLowerCase().replace(/\b\w/g,(x)=>x.toUpperCase());
@@ -87,31 +87,279 @@ function Kpis({items}:{items:[string,string,string][]}){return <section classNam
 function OrdersTable({orders,act,busy}:{orders:Order[];act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){return <div className="ops-table"><div className="ops-row ops-head"><span>REFERENCE</span><span>DETAILS</span><span>STATUS</span><span>VALUE</span><span>ACTION</span></div>{orders.map((o)=><div className="ops-row" key={o.id}><b>{o.reference}</b><span>{o.vendor}<small>{o.service} • {orderSummary(o)}</small></span><Status value={o.status}/><strong>{money(o.total)}</strong><OrderAction order={o} act={act} busy={busy}/></div>)}{!orders.length&&<Empty title="No matching work" copy="New activity will appear here automatically."/>}</div>}
 function OrderAction({order,act,busy}:{order:Order;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){if(terminalStatuses.includes(order.status))return null;return <div className="row-actions"><button className="danger" disabled={busy} onClick={()=>void act({action:"order.transition",id:order.id,to:"CANCELLED_BY_ADMIN"})}>Cancel</button></div>}
 
-function Admin({state,act,busy}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){const [page,setPage]=useState("Dashboard");const orders=state.orders;const gmv=orders.reduce((s,x)=>s+x.total,0);const active=orders.filter((x)=>!terminalStatuses.includes(x.status));const rides=orders.filter((x)=>x.service==="Bike Taxi");const parcels=orders.filter((x)=>x.service==="Parcel");return <Shell page={page} setPage={setPage} state={state}>{page==="Dashboard"&&<><div className="overview"><span><small>Command center</small><h2>Operations at a glance.</h2></span><b>LIVE DATA</b></div><Kpis items={[[money(gmv),"Total GMV","All services"],[String(orders.length),"Total orders & jobs","Live"],[String(active.length),"Active operations","Now"],[String(state.services.filter((x)=>x.enabled).length),"Enabled services","of 6"]]}/><section className="panel"><div><span><h2>Live operations</h2><small>Customer, vendor and partner activity</small></span></div><OrdersTable orders={active.slice(0,7)} act={act} busy={busy}/></section></>}{["Live Operations","Orders"].includes(page)&&<WorkspacePage eyebrow="REALTIME OPERATIONS" title={page} copy="Monitor status and intervene when necessary."><OrdersTable orders={page==="Orders"?orders:active} act={act} busy={busy}/></WorkspacePage>}{page==="Rides"&&<WorkspacePage eyebrow="RIDE ENGINE" title="Bike taxi" copy="Ride requests, driver assignments and completions."><OrdersTable orders={rides} act={act} busy={busy}/></WorkspacePage>}{page==="Parcels"&&<WorkspacePage eyebrow="PARCEL ENGINE" title="Parcel operations" copy="Pickup, transit and delivery verification."><OrdersTable orders={parcels} act={act} busy={busy}/></WorkspacePage>}{page==="Catalog"&&<AdminCatalog state={state} act={act} busy={busy}/>} {page==="Settings"&&<AdminSettings state={state} act={act}/>} {page==="Finance"&&<StatsPage title="Platform finance" stats={[["Gross merchandise value",money(gmv)],["Platform revenue",money(gmv*.18)],["Vendor payable",money(gmv*.82)]]}/>} {page==="Vendors"&&<AdminVendors/>} {page==="Delivery Partners"&&<Directory title="Delivery partners" rows={[["Ravi Kumar","Bike • All services",state.settings.partner_online==="true"?"Online":"Offline"],["Anil K","EV Scooter • Commerce","Offline"],["Suresh B","Bike • Rides & Parcel","Online"]]}/>} {page==="Customers"&&<Directory title="Customers" rows={[["Bhargav Reddy",`${orders.length} activities`,money(gmv)],["Kavya S","4 activities","₹1,840"],["Ramesh K","2 activities","₹760"]]}/>} {page==="Support"&&<Directory title="Support tickets" rows={[["#TKT-1042","Order delayed","Open"],["#TKT-1039","Payment issue","In progress"],["#TKT-1034","Missing item","Resolved"]]}/>} {page==="Reports"&&<StatsPage title="Performance reports" stats={commerce.map((x)=>[x,`${orders.filter((o)=>o.service===x).length} orders`])}/>}</Shell>}
+function Admin({state,act,busy}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){const [page,setPage]=useState("Dashboard");const orders=state.orders;const gmv=orders.reduce((s,x)=>s+x.total,0);const active=orders.filter((x)=>!terminalStatuses.includes(x.status));const rides=orders.filter((x)=>x.service==="Bike Taxi");const parcels=orders.filter((x)=>x.service==="Parcel");return <Shell page={page} setPage={setPage} state={state}>{page==="Dashboard"&&<><div className="overview"><span><small>Command center</small><h2>Operations at a glance.</h2></span><b>LIVE DATA</b></div><Kpis items={[[money(gmv),"Total GMV","All services"],[String(orders.length),"Total orders & jobs","Live"],[String(active.length),"Active operations","Now"],[String(state.services.filter((x)=>x.enabled).length),"Enabled services","of 6"]]}/><section className="panel"><div><span><h2>Live operations</h2><small>Customer, vendor and partner activity</small></span></div><OrdersTable orders={active.slice(0,7)} act={act} busy={busy}/></section></>}{page==="Live Orders"&&<AdminLiveOrders/>}{["Live Operations","Orders"].includes(page)&&<WorkspacePage eyebrow="REALTIME OPERATIONS" title={page} copy="Monitor status and intervene when necessary."><OrdersTable orders={page==="Orders"?orders:active} act={act} busy={busy}/></WorkspacePage>}{page==="Rides"&&<WorkspacePage eyebrow="RIDE ENGINE" title="Bike taxi" copy="Ride requests, driver assignments and completions."><OrdersTable orders={rides} act={act} busy={busy}/></WorkspacePage>}{page==="Parcels"&&<WorkspacePage eyebrow="PARCEL ENGINE" title="Parcel operations" copy="Pickup, transit and delivery verification."><OrdersTable orders={parcels} act={act} busy={busy}/></WorkspacePage>}{page==="Catalog"&&<AdminCatalog state={state} act={act} busy={busy}/>} {page==="Settings"&&<AdminSettings state={state} act={act}/>} {page==="Finance"&&<StatsPage title="Platform finance" stats={[["Gross merchandise value",money(gmv)],["Platform revenue",money(gmv*.18)],["Vendor payable",money(gmv*.82)]]}/>} {page==="Vendors"&&<AdminVendors/>} {page==="Delivery Partners"&&<AdminPartners/>} {page==="Customers"&&<AdminCustomers/>} {page==="Support"&&<Directory title="Support tickets" rows={[["#TKT-1042","Order delayed","Open"],["#TKT-1039","Payment issue","In progress"],["#TKT-1034","Missing item","Resolved"]]}/>} {page==="Reports"&&<StatsPage title="Performance reports" stats={commerce.map((x)=>[x,`${orders.filter((o)=>o.service===x).length} orders`])}/>}</Shell>}
 function AdminCatalog({state,act,busy}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){return <WorkspacePage eyebrow="CATALOG & INVENTORY" title="All products" copy="Live price, stock and service availability."><div className="inventory-list">{state.products.map((p)=><article key={p.id}><i>{p.name[0]}</i><span><small>{p.service} • {p.vendor}</small><h3>{p.name}</h3><p>{money(p.price)} • ★ {p.rating}</p></span><b className={p.stock<15?"low-stock":""}>{p.stock} stock</b><div className="qty"><button disabled={busy} onClick={()=>void act({action:"stock.adjust",id:p.id,amount:-1})}>−</button><button disabled={busy} onClick={()=>void act({action:"stock.adjust",id:p.id,amount:5})}>+5</button></div></article>)}</div></WorkspacePage>}
 function AdminSettings({state,act}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>}){return <WorkspacePage eyebrow="SERVICE AREA" title="Jangareddigudem" copy="Enable services independently for this operating area."><div className="setting-list">{state.services.map((s)=><article key={s.service}><i>{s.service[0]}</i><span><b>{s.service}</b><small>{s.enabled?"Available to customers":"Temporarily unavailable"}</small></span><button className={s.enabled?"toggle on":"toggle"} onClick={()=>void act({action:"service.toggle",service:s.service,enabled:!s.enabled})}><i/></button></article>)}</div></WorkspacePage>}
 
-type AdminRestaurant = { id:string; name:string; area:string; isOpen:boolean; owner:{id:string;name:string;email:string}|null };
+type AdminRestaurant = { id:string; name:string; area:string; isOpen:boolean; status:string; manualOrderAcceptance:boolean; owner:{id:string;name:string;email:string}|null };
 type AdminVendorUser = { id:string; name:string; email:string; role:string; status:string };
+type AdminVendorTeamMember = { id:string; name:string; email:string; phone:string|null; role:string; status:string; staffTitle:string|null; isPrimaryOwner:boolean; permissions:string[] };
 async function adminApi<T>(path:string,init?:RequestInit):Promise<T>{const res=await fetch(`/api/v1/admin${path}`,{...init,headers:{"content-type":"application/json",...init?.headers}});const json=await res.json() as {success:boolean;data?:T;error?:{message:string}};if(!json.success||!json.data)throw new Error(json.error?.message||"Request failed");return json.data;}
+
+const VENDOR_PERMISSIONS = ["CAN_VIEW_ORDERS","CAN_ACCEPT_ORDER","CAN_REJECT_ORDER","CAN_UPDATE_ORDER_STATUS","CAN_MARK_READY","CAN_MANAGE_PRODUCTS","CAN_MANAGE_STOCK","CAN_MANAGE_PRICES","CAN_MANAGE_OFFERS","CAN_VIEW_REPORTS","CAN_MANAGE_VENDOR_USERS"];
+
 function AdminVendors(){
   const [restaurants,setRestaurants]=useState<AdminRestaurant[]|null>(null);
   const [vendors,setVendors]=useState<AdminVendorUser[]>([]);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
+  const [showCreate,setShowCreate]=useState(false);
+  const [expanded,setExpanded]=useState<string|null>(null);
   const load=useCallback(async()=>{try{const [r,v]=await Promise.all([adminApi<{restaurants:AdminRestaurant[]}>("/restaurants"),adminApi<{vendors:AdminVendorUser[]}>("/vendors")]);setRestaurants(r.restaurants);setVendors(v.vendors);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load vendors");}},[]);
   useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
   const assign=async(restaurantId:string,userId:string)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/owner`,{method:"PATCH",body:JSON.stringify({userId:userId||null})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not assign owner");}finally{setBusy(false);}};
-  return <WorkspacePage eyebrow="VENDOR ACCOUNTS" title="Restaurants & owners" copy="Link a vendor account to a restaurant so its menu shows up in the Vendor app.">
+  const toggleManual=async(r:AdminRestaurant)=>{setBusy(true);try{await adminApi(`/restaurants/${r.id}/manual-acceptance`,{method:"PATCH",body:JSON.stringify({manualOrderAcceptance:!r.manualOrderAcceptance})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update this vendor's setting");}finally{setBusy(false);}};
+
+  return <WorkspacePage eyebrow="VENDOR ACCOUNTS" title="Restaurants & owners" copy="Create vendors, link owners, control order acceptance, and manage each vendor's Vendor App team.">
     {error&&<p className="auth-error">{error}</p>}
-    {restaurants===null?<Empty title="Loading…" copy="Fetching restaurants and vendor accounts."/>:!restaurants.length?<Empty title="No restaurants yet" copy="Seed the catalog to see restaurants here."/>:
-    <div className="directory">{restaurants.map((r)=><article key={r.id}><i>{r.name[0]}</i><span><b>{r.name}</b><small>{r.area} • {r.isOpen?"Open":"Closed"}{r.owner?` • Owned by ${r.owner.name}`:" • Unassigned"}</small></span>
-      <select disabled={busy} value={r.owner?.id||""} onChange={(e)=>void assign(r.id,e.target.value)} aria-label={`Assign owner for ${r.name}`}>
-        <option value="">Unassigned</option>
-        {vendors.map((v)=><option key={v.id} value={v.id}>{v.name} ({v.email})</option>)}
-      </select>
+    <PrimaryActionButton label={showCreate?"Cancel":"+ Create Vendor"} onClick={()=>setShowCreate(!showCreate)}/>
+    {showCreate&&<CreateVendorForm onCreated={()=>{setShowCreate(false);void load();}}/>}
+    {restaurants===null?<Empty title="Loading…" copy="Fetching restaurants and vendor accounts."/>:!restaurants.length?<Empty title="No restaurants yet" copy="Create one above, or seed the catalog to see restaurants here."/>:
+    <div className="directory">{restaurants.map((r)=><article key={r.id} className="vendor-row">
+      <div className="vendor-row-head">
+        <i>{r.name[0]}</i>
+        <span><b>{r.name}</b><small>{r.area} • {r.isOpen?"Open":"Closed"} • {r.status}{r.owner?` • Owned by ${r.owner.name}`:" • Unassigned"}</small></span>
+        <button className="toggle-labelled" onClick={()=>void toggleManual(r)} disabled={busy} title="Require Vendor Order Acceptance">
+          <span className={r.manualOrderAcceptance?"toggle on":"toggle"}><i/></span>
+          <small>{r.manualOrderAcceptance?"Manual accept ON":"Auto-accept ON"}</small>
+        </button>
+      </div>
+      <div className="vendor-row-actions">
+        <select disabled={busy} value={r.owner?.id||""} onChange={(e)=>void assign(r.id,e.target.value)} aria-label={`Assign owner for ${r.name}`}>
+          <option value="">Unassigned</option>
+          {vendors.map((v)=><option key={v.id} value={v.id}>{v.name} ({v.email})</option>)}
+        </select>
+        <button className="secondary" onClick={()=>setExpanded(expanded===r.id?null:r.id)}>{expanded===r.id?"Hide team":"Manage team"}</button>
+      </div>
+      {expanded===r.id&&<VendorTeamPanel restaurantId={r.id}/>}
     </article>)}</div>}
   </WorkspacePage>;
+}
+
+function PrimaryActionButton({label,onClick}:{label:string;onClick:()=>void}){return <button className="primary" style={{width:"max-content",marginBottom:14}} onClick={onClick}>{label}</button>;}
+
+function CreateVendorForm({onCreated}:{onCreated:()=>void}){
+  const [form,setForm]=useState({name:"",area:"",latitude:"",longitude:"",businessType:"",manualOrderAcceptance:true});
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
+    try{
+      await adminApi("/restaurants",{method:"POST",body:JSON.stringify({name:form.name,area:form.area,latitude:Number(form.latitude),longitude:Number(form.longitude),businessType:form.businessType||null,manualOrderAcceptance:form.manualOrderAcceptance})});
+      onCreated();
+    }catch(e){setError(e instanceof Error?e.message:"Could not create vendor");}finally{setBusy(false);}
+  };
+  return <form className="auth-form inline-form" onSubmit={(e)=>void submit(e)}>
+    <label>Business name<input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></label>
+    <label>Area<input required value={form.area} onChange={(e)=>setForm({...form,area:e.target.value})}/></label>
+    <label>Latitude<input required type="number" step="any" value={form.latitude} onChange={(e)=>setForm({...form,latitude:e.target.value})}/></label>
+    <label>Longitude<input required type="number" step="any" value={form.longitude} onChange={(e)=>setForm({...form,longitude:e.target.value})}/></label>
+    <label>Business type<input value={form.businessType} onChange={(e)=>setForm({...form,businessType:e.target.value})}/></label>
+    <label className="checkbox-label"><input type="checkbox" checked={form.manualOrderAcceptance} onChange={(e)=>setForm({...form,manualOrderAcceptance:e.target.checked})}/>Require vendor order acceptance</label>
+    {error&&<p className="auth-error">{error}</p>}
+    <button className="primary" disabled={busy}>{busy?"Creating…":"Create vendor"}</button>
+  </form>;
+}
+
+function VendorTeamPanel({restaurantId}:{restaurantId:string}){
+  const [team,setTeam]=useState<AdminVendorTeamMember[]|null>(null);
+  const [showAdd,setShowAdd]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const load=useCallback(async()=>{try{const r=await adminApi<{users:AdminVendorTeamMember[]}>(`/restaurants/${restaurantId}/users`);setTeam(r.users);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load the vendor's team");}},[restaurantId]);
+  useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
+
+  const setStatus=async(userId:string,status:string)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/users/${userId}`,{method:"PATCH",body:JSON.stringify({status})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update this user");}finally{setBusy(false);}};
+  const togglePermission=async(member:AdminVendorTeamMember,permission:string)=>{
+    if(member.isPrimaryOwner)return; // owner always has every permission, nothing to toggle
+    const next=member.permissions.includes(permission)?member.permissions.filter((p)=>p!==permission):[...member.permissions,permission];
+    setBusy(true);
+    try{await adminApi(`/restaurants/${restaurantId}/users/${member.id}`,{method:"PATCH",body:JSON.stringify({permissions:next})});await load();}
+    catch(e){setError(e instanceof Error?e.message:"Could not update permissions");}finally{setBusy(false);}
+  };
+  const resetAccess=async(userId:string)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/users/${userId}/reset-access`,{method:"POST"});}catch(e){setError(e instanceof Error?e.message:"Could not reset access");}finally{setBusy(false);}};
+  const remove=async(userId:string)=>{if(!confirm("Remove this vendor user?"))return;setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/users/${userId}`,{method:"DELETE"});await load();}catch(e){setError(e instanceof Error?e.message:"Could not remove this user");}finally{setBusy(false);}};
+
+  return <div className="team-panel">
+    {error&&<p className="auth-error">{error}</p>}
+    {team===null?<p className="muted-note">Loading team…</p>:!team.length?<p className="muted-note">No vendor users yet.</p>:
+      <div className="team-list">{team.map((m)=><div key={m.id} className="team-member">
+        <div className="team-member-head">
+          <b>{m.name}</b><small>{m.email}{m.staffTitle?` • ${m.staffTitle}`:""} • {label(m.role)}{m.isPrimaryOwner?" • Owner":""}</small>
+          <span className={`status status-${m.status.toLowerCase()}`}>● {label(m.status)}</span>
+        </div>
+        <div className="permission-grid">
+          {VENDOR_PERMISSIONS.map((p)=><label key={p} className="checkbox-label small">
+            <input type="checkbox" disabled={busy||m.isPrimaryOwner} checked={m.isPrimaryOwner||m.permissions.includes(p)} onChange={()=>void togglePermission(m,p)}/>
+            {label(p.replace("CAN_",""))}
+          </label>)}
+        </div>
+        <div className="team-member-actions">
+          {m.status==="ACTIVE"?<button className="secondary" disabled={busy} onClick={()=>void setStatus(m.id,"SUSPENDED")}>Suspend</button>:<button className="secondary" disabled={busy} onClick={()=>void setStatus(m.id,"ACTIVE")}>Activate</button>}
+          <button className="secondary" disabled={busy} onClick={()=>void resetAccess(m.id)}>Reset login access</button>
+          {!m.isPrimaryOwner&&<button className="secondary danger-text" disabled={busy} onClick={()=>void remove(m.id)}>Remove</button>}
+        </div>
+      </div>)}</div>}
+    <PrimaryActionButton label={showAdd?"Cancel":"+ Add Vendor User"} onClick={()=>setShowAdd(!showAdd)}/>
+    {showAdd&&<AddVendorUserForm restaurantId={restaurantId} onCreated={()=>{setShowAdd(false);void load();}}/>}
+  </div>;
+}
+
+function AddVendorUserForm({restaurantId,onCreated}:{restaurantId:string;onCreated:()=>void}){
+  const [form,setForm]=useState({name:"",email:"",phone:"",role:"VENDOR_STAFF",staffTitle:""});
+  const [permissions,setPermissions]=useState<string[]>(["CAN_VIEW_ORDERS"]);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const togglePerm=(p:string)=>setPermissions(permissions.includes(p)?permissions.filter((x)=>x!==p):[...permissions,p]);
+  const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
+    try{
+      await adminApi(`/restaurants/${restaurantId}/users`,{method:"POST",body:JSON.stringify({name:form.name,email:form.email,phone:form.phone||undefined,role:form.role,staffTitle:form.staffTitle||null,permissions})});
+      onCreated();
+    }catch(e){setError(e instanceof Error?e.message:"Could not create this vendor user");}finally{setBusy(false);}
+  };
+  return <form className="auth-form inline-form" onSubmit={(e)=>void submit(e)}>
+    <label>Full name<input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></label>
+    <label>Email<input required type="email" value={form.email} onChange={(e)=>setForm({...form,email:e.target.value})}/></label>
+    <label>Phone (optional)<input value={form.phone} onChange={(e)=>setForm({...form,phone:e.target.value})}/></label>
+    <label>Title (e.g. Kitchen Staff)<input value={form.staffTitle} onChange={(e)=>setForm({...form,staffTitle:e.target.value})}/></label>
+    <label>Role
+      <select value={form.role} onChange={(e)=>setForm({...form,role:e.target.value})}>
+        <option value="VENDOR_OWNER">Owner</option>
+        <option value="VENDOR_MANAGER">Manager</option>
+        <option value="VENDOR_STAFF">Staff</option>
+      </select>
+    </label>
+    <div className="permission-grid">{VENDOR_PERMISSIONS.map((p)=><label key={p} className="checkbox-label small"><input type="checkbox" checked={permissions.includes(p)} onChange={()=>togglePerm(p)}/>{label(p.replace("CAN_",""))}</label>)}</div>
+    <p className="muted-note">{"They'll sign into the Vendor App with an OTP sent to this email or phone — no password to hand over."}</p>
+    {error&&<p className="auth-error">{error}</p>}
+    <button className="primary" disabled={busy}>{busy?"Creating…":"Create vendor user"}</button>
+  </form>;
+}
+
+type AdminCustomerRow = { id:string; name:string; email:string; phone:string|null; status:string; joinedAt:string; orders:number; completedOrders:number; cancelledOrders:number; totalSpend:number; lastOrderAt:string|null };
+
+function AdminCustomers(){
+  const [customers,setCustomers]=useState<AdminCustomerRow[]|null>(null);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const load=useCallback(async()=>{try{const r=await adminApi<{customers:AdminCustomerRow[]}>("/customers");setCustomers(r.customers);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load customers");}},[]);
+  useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
+  const setStatus=async(id:string,status:string)=>{setBusy(true);try{await adminApi(`/customers/${id}/status`,{method:"PATCH",body:JSON.stringify({status})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update this customer");}finally{setBusy(false);}};
+
+  return <WorkspacePage eyebrow="CUSTOMER ACCOUNTS" title="Customers" copy="Every registered customer, their order history and account status.">
+    {error&&<p className="auth-error">{error}</p>}
+    {customers===null?<Empty title="Loading…" copy="Fetching customers."/>:!customers.length?<Empty title="No customers yet" copy="Customers appear here once they sign up in the app."/>:
+    <div className="directory">{customers.map((c)=><article key={c.id}>
+      <i>{c.name[0]||"?"}</i>
+      <span><b>{c.name}</b><small>{c.email}{c.phone?` • ${c.phone}`:""} • {c.orders} orders ({c.completedOrders} completed, {c.cancelledOrders} cancelled) • {money(c.totalSpend)} lifetime</small></span>
+      <span className={`status status-${c.status.toLowerCase()}`}>● {label(c.status)}</span>
+      {c.status==="ACTIVE"?<button className="secondary" disabled={busy} onClick={()=>void setStatus(c.id,"SUSPENDED")}>Suspend</button>:<button className="secondary" disabled={busy} onClick={()=>void setStatus(c.id,"ACTIVE")}>Activate</button>}
+    </article>)}</div>}
+  </WorkspacePage>;
+}
+
+type AdminPartnerRow = { id:string; name:string; email:string; phone:string|null; vehicleType:string|null; vehicleNumber:string|null; status:string; partnerApprovalStatus:string; partnerOnline:boolean; partnerBusy:boolean };
+
+function AdminPartners(){
+  const [partners,setPartners]=useState<AdminPartnerRow[]|null>(null);
+  const [showCreate,setShowCreate]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const load=useCallback(async()=>{try{const r=await adminApi<{partners:AdminPartnerRow[]}>("/partners");setPartners(r.partners);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load delivery partners");}},[]);
+  useEffect(()=>{const initial=setTimeout(()=>void load(),0);const t=setInterval(()=>void load(),8000);return()=>{clearTimeout(initial);clearInterval(t);};},[load]);
+  const setApproval=async(id:string,approvalStatus:string)=>{setBusy(true);try{await adminApi(`/partners/${id}/approval`,{method:"PATCH",body:JSON.stringify({approvalStatus})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update approval");}finally{setBusy(false);}};
+  const setStatus=async(id:string,status:string)=>{setBusy(true);try{await adminApi(`/partners/${id}/status`,{method:"PATCH",body:JSON.stringify({status})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update status");}finally{setBusy(false);}};
+
+  return <WorkspacePage eyebrow="DELIVERY FLEET" title="Delivery partners" copy="Approve new partners, and control who can go online and receive deliveries.">
+    {error&&<p className="auth-error">{error}</p>}
+    <PrimaryActionButton label={showCreate?"Cancel":"+ Create Delivery Partner"} onClick={()=>setShowCreate(!showCreate)}/>
+    {showCreate&&<CreatePartnerForm onCreated={()=>{setShowCreate(false);void load();}}/>}
+    {partners===null?<Empty title="Loading…" copy="Fetching delivery partners."/>:!partners.length?<Empty title="No delivery partners yet" copy="Create one above to get started."/>:
+    <div className="directory">{partners.map((p)=><article key={p.id}>
+      <i>{p.name[0]||"?"}</i>
+      <span><b>{p.name}</b><small>{p.email}{p.phone?` • ${p.phone}`:""}{p.vehicleType?` • ${p.vehicleType} ${p.vehicleNumber||""}`:""}</small></span>
+      <span className={`status status-${p.partnerOnline?"online":"suspended"}`}>● {p.partnerBusy?"On a delivery":p.partnerOnline?"Online":"Offline"}</span>
+      {p.partnerApprovalStatus==="PENDING"?<><button className="secondary" disabled={busy} onClick={()=>void setApproval(p.id,"APPROVED")}>Approve</button><button className="secondary danger-text" disabled={busy} onClick={()=>void setApproval(p.id,"REJECTED")}>Reject</button></>
+        :p.status==="ACTIVE"?<button className="secondary" disabled={busy} onClick={()=>void setStatus(p.id,"SUSPENDED")}>Suspend</button>:<button className="secondary" disabled={busy} onClick={()=>void setStatus(p.id,"ACTIVE")}>Activate</button>}
+    </article>)}</div>}
+  </WorkspacePage>;
+}
+
+function CreatePartnerForm({onCreated}:{onCreated:()=>void}){
+  const [form,setForm]=useState({name:"",email:"",phone:"",vehicleType:"Bike",vehicleNumber:"",licenceNumber:""});
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
+    try{await adminApi("/partners",{method:"POST",body:JSON.stringify(form)});onCreated();}
+    catch(e){setError(e instanceof Error?e.message:"Could not create this delivery partner");}finally{setBusy(false);}
+  };
+  return <form className="auth-form inline-form" onSubmit={(e)=>void submit(e)}>
+    <label>Full name<input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></label>
+    <label>Email<input required type="email" value={form.email} onChange={(e)=>setForm({...form,email:e.target.value})}/></label>
+    <label>Phone<input value={form.phone} onChange={(e)=>setForm({...form,phone:e.target.value})}/></label>
+    <label>Vehicle type<input value={form.vehicleType} onChange={(e)=>setForm({...form,vehicleType:e.target.value})}/></label>
+    <label>Vehicle number<input value={form.vehicleNumber} onChange={(e)=>setForm({...form,vehicleNumber:e.target.value})}/></label>
+    <label>Licence number<input value={form.licenceNumber} onChange={(e)=>setForm({...form,licenceNumber:e.target.value})}/></label>
+    <p className="muted-note">{"They'll sign into the Delivery Partner App with an OTP, and can go online once approved here."}</p>
+    {error&&<p className="auth-error">{error}</p>}
+    <button className="primary" disabled={busy}>{busy?"Creating…":"Create delivery partner"}</button>
+  </form>;
+}
+
+type AdminLiveOrder = { id:string; orderNumber:string; customerName:string; restaurantName:string; status:string; total:number; paymentStatus:string; deliveryOfferStatus:string; partner:{id:string;name:string|null;latitude:number|null;longitude:number|null;locationUpdatedAt:string|null}|null; createdAt:string; estimatedDeliveryMinutes:number };
+
+function AdminLiveOrders(){
+  const [orders,setOrders]=useState<AdminLiveOrder[]|null>(null);
+  const [error,setError]=useState("");
+  const [expanded,setExpanded]=useState<string|null>(null);
+  const load=useCallback(async()=>{try{const r=await adminApi<{orders:AdminLiveOrder[]}>("/orders/live");setOrders(r.orders);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load live orders");}},[]);
+  useEffect(()=>{const initial=setTimeout(()=>void load(),0);const t=setInterval(()=>void load(),4000);return()=>{clearTimeout(initial);clearInterval(t);};},[load]);
+
+  return <WorkspacePage eyebrow="REALTIME OPERATIONS" title="Live Orders" copy="Every order still in flight, updating automatically every few seconds.">
+    {error&&<p className="auth-error">{error}</p>}
+    {orders===null?<Empty title="Loading…" copy="Fetching live orders."/>:!orders.length?<Empty title="Nothing in flight" copy="Every order is either delivered or cancelled right now."/>:
+    <div className="ops-table">
+      <div className="ops-row ops-head"><span>ORDER</span><span>DETAILS</span><span>STATUS</span><span>VALUE</span><span>DELIVERY</span></div>
+      {orders.map((o)=><div key={o.id}>
+        <div className="ops-row" style={{cursor:"pointer"}} role="button" tabIndex={0} onClick={()=>setExpanded(expanded===o.id?null:o.id)} onKeyDown={(e)=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();setExpanded(expanded===o.id?null:o.id);}}}>
+          <b>{o.orderNumber}</b>
+          <span>{o.customerName}<small>{o.restaurantName}</small></span>
+          <Status value={o.status}/>
+          <strong>{money(o.total)}</strong>
+          <span>{o.partner?o.partner.name:o.deliveryOfferStatus==="OFFERING"?"Finding partner…":"—"}</span>
+        </div>
+        {expanded===o.id&&<AdminOrderDetail orderId={o.id}/>}
+      </div>)}
+    </div>}
+  </WorkspacePage>;
+}
+
+type AdminOrderEvent = { event:string; actorType:string; at:string; metadata:unknown };
+function AdminOrderDetail({orderId}:{orderId:string}){
+  const [detail,setDetail]=useState<{order:unknown;events:AdminOrderEvent[];tracking:{latitude:number;longitude:number;updatedAt:string;partnerPhone:string|null}|null}|null>(null);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  useEffect(()=>{let cancelled=false;adminApi<typeof detail>(`/orders/${orderId}/detail`).then((d)=>{if(!cancelled)setDetail(d);}).catch((e)=>{if(!cancelled)setError(e instanceof Error?e.message:"Could not load this order");});return()=>{cancelled=true;};},[orderId]);
+  const reassign=async()=>{setBusy(true);try{await adminApi(`/orders/${orderId}/reassign-partner`,{method:"POST"});}catch(e){setError(e instanceof Error?e.message:"Could not reassign");}finally{setBusy(false);}};
+  const cancelOrder=async()=>{if(!confirm("Cancel this order?"))return;setBusy(true);try{await fetch(`/api/v1/orders/${orderId}/cancel`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({reason:"Admin override"})});}catch(e){setError(e instanceof Error?e.message:"Could not cancel");}finally{setBusy(false);}};
+
+  if(error)return <div className="order-detail"><p className="auth-error">{error}</p></div>;
+  if(!detail)return <div className="order-detail"><p className="muted-note">Loading order detail…</p></div>;
+  return <div className="order-detail">
+    <div className="order-detail-grid">
+      <div>
+        <h4>Timeline</h4>
+        <ul className="event-list">{detail.events.map((e,i)=><li key={i}><b>{label(e.event)}</b><small>{e.actorType} • {new Date(e.at).toLocaleTimeString()}</small></li>)}</ul>
+      </div>
+      <div>
+        <h4>Live tracking</h4>
+        {detail.tracking?<p className="muted-note">Lat {detail.tracking.latitude.toFixed(4)}, Lng {detail.tracking.longitude.toFixed(4)}<br/>Updated {new Date(detail.tracking.updatedAt).toLocaleTimeString()}{detail.tracking.partnerPhone?<><br/>Phone: {detail.tracking.partnerPhone}</>:null}</p>:<p className="muted-note">No delivery partner GPS yet.</p>}
+        <div className="team-member-actions">
+          <button className="secondary" disabled={busy} onClick={()=>void reassign()}>Reassign delivery partner</button>
+          <button className="secondary danger-text" disabled={busy} onClick={()=>void cancelOrder()}>Cancel order</button>
+        </div>
+      </div>
+    </div>
+  </div>;
 }
 
 function WorkspacePage({eyebrow,title,copy,children}:{eyebrow:string;title:string;copy:string;children:React.ReactNode}){return <section className="workspace-page"><div className="page-head"><small>{eyebrow}</small><h1>{title}</h1><p>{copy}</p></div>{children}</section>}
