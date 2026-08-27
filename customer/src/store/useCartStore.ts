@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { calculateBill } from "@/services/PricingService";
 import { useCatalogStore } from "@/store/useCatalogStore";
+import { usePricingStore } from "@/store/usePricingStore";
 import { BillBreakdown, CartLineItem, DeliveryInstruction } from "@/types";
 
 const STORAGE_KEY = "goocart.cart.v1";
@@ -159,8 +160,9 @@ export function useCartBill(): BillBreakdown {
   const couponCode = useCartStore((s) => s.couponCode);
   const tip = useCartStore((s) => s.tip);
   const coupons = useCatalogStore((s) => s.coupons);
+  const settings = usePricingStore((s) => s.settings);
   return useMemo(() => {
     const coupon = couponCode ? coupons.find((c) => c.code.toLowerCase() === couponCode.toLowerCase()) ?? null : null;
-    return calculateBill(items, coupon, tip);
-  }, [items, couponCode, tip, coupons]);
+    return calculateBill(items, coupon, tip, settings);
+  }, [items, couponCode, tip, coupons, settings]);
 }

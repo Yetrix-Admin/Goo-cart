@@ -1,12 +1,24 @@
 // Authoritative pricing. The client computes the same numbers for display, but
 // only this module's output is ever persisted or charged — a client-supplied
-// total is never trusted.
+// total is never trusted. The actual fee/discount VALUES are admin-controlled
+// (see PricingSettings in models.ts and admin.ts's /pricing-settings route);
+// these are only the fallback defaults used before an admin ever sets one.
 
-export const DELIVERY_FEE = 30;
-export const PLATFORM_FEE = 8;
-export const TAX_RATE = 0.05;
-const RESTAURANT_DISCOUNT_THRESHOLD = 300;
-const RESTAURANT_DISCOUNT = 50;
+export const DEFAULT_PRICING_SETTINGS: PricingSettings = {
+  deliveryFee: 30,
+  platformFee: 8,
+  taxRatePercent: 5,
+  restaurantDiscountThreshold: 300,
+  restaurantDiscountAmount: 50,
+};
+
+export type PricingSettings = {
+  deliveryFee: number;
+  platformFee: number;
+  taxRatePercent: number;
+  restaurantDiscountThreshold: number;
+  restaurantDiscountAmount: number;
+};
 
 export type CouponRule = {
   code: string;
@@ -29,9 +41,9 @@ export type Bill = {
   total: number;
 };
 
-export function calculateBill(lines: PricedLine[], coupon: CouponRule | null, tip: number): Bill {
+export function calculateBill(lines: PricedLine[], coupon: CouponRule | null, tip: number, settings: PricingSettings = DEFAULT_PRICING_SETTINGS): Bill {
   const itemTotal = lines.reduce((sum, l) => sum + l.lineTotal, 0);
-  const restaurantDiscount = itemTotal >= RESTAURANT_DISCOUNT_THRESHOLD ? RESTAURANT_DISCOUNT : 0;
+  const restaurantDiscount = itemTotal >= settings.restaurantDiscountThreshold ? settings.restaurantDiscountAmount : 0;
   const afterRestaurantDiscount = itemTotal - restaurantDiscount;
 
   const couponApplies = coupon !== null && afterRestaurantDiscount >= coupon.minOrder;
@@ -45,9 +57,9 @@ export function calculateBill(lines: PricedLine[], coupon: CouponRule | null, ti
     couponDiscount = Math.round(coupon!.maxDiscount ? Math.min(raw, coupon!.maxDiscount) : raw);
   }
 
-  const deliveryFee = freeDelivery ? 0 : DELIVERY_FEE;
+  const deliveryFee = freeDelivery ? 0 : settings.deliveryFee;
   const taxableBase = Math.max(0, afterRestaurantDiscount - couponDiscount);
-  const taxes = Math.round(taxableBase * TAX_RATE);
+  const taxes = Math.round(taxableBase * (settings.taxRatePercent / 100));
   const safeTip = Number.isFinite(tip) && tip > 0 ? Math.round(tip) : 0;
 
   return {
@@ -55,9 +67,9 @@ export function calculateBill(lines: PricedLine[], coupon: CouponRule | null, ti
     restaurantDiscount,
     couponDiscount,
     deliveryFee,
-    platformFee: PLATFORM_FEE,
+    platformFee: settings.platformFee,
     taxes,
     tip: safeTip,
-    total: Math.round(taxableBase + deliveryFee + PLATFORM_FEE + taxes + safeTip),
+    total: Math.round(taxableBase + deliveryFee + settings.platformFee + taxes + safeTip),
   };
 }

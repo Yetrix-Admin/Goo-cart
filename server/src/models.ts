@@ -116,7 +116,9 @@ const roleSchema = new Schema(
 
 // --- Catalog --------------------------------------------------------------
 
-const offerSchema = new Schema({ title: { type: String, required: true }, description: { type: String, default: null } }, { _id: false });
+// _id (default true) so admin can address a single offer to edit/delete it,
+// not just push/replace the whole array.
+const offerSchema = new Schema({ title: { type: String, required: true }, description: { type: String, default: null } });
 const categorySchema = new Schema({ key: { type: String, required: true }, name: { type: String, required: true }, sortOrder: { type: Number, default: 0 } }, { _id: false });
 
 const restaurantSchema = new Schema(
@@ -425,10 +427,27 @@ const pricingRuleSchema = new Schema(
   { versionKey: false, timestamps: true },
 );
 
+// Singleton document (_id: "food") the admin edits to control every fee and
+// discount rule calculateBill() applies — nothing about pricing is hardcoded
+// in a way only a redeploy could change (spec: "admin can set the discount
+// thing and percentage things and everything should handle from admin only").
+const pricingSettingsSchema = new Schema(
+  {
+    _id: { type: String },
+    deliveryFee: { type: Number, required: true, min: 0 },
+    platformFee: { type: Number, required: true, min: 0 },
+    taxRatePercent: { type: Number, required: true, min: 0, max: 100 },
+    restaurantDiscountThreshold: { type: Number, required: true, min: 0 },
+    restaurantDiscountAmount: { type: Number, required: true, min: 0 },
+  },
+  { versionKey: false, timestamps: true },
+);
+
 export const Product = model("Product", productSchema);
 export const ServiceOrder = model("ServiceOrder", serviceOrderSchema);
 export const VendorOffer = model("VendorOffer", vendorOfferSchema);
 export const PricingRule = model("PricingRule", pricingRuleSchema);
+export const PricingSettings = model("PricingSettings", pricingSettingsSchema);
 
 export const User = model("User", userSchema);
 export const Session = model("Session", sessionSchema);

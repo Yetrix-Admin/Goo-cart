@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { AuditLog, Order, Restaurant, Session, User } from "../models.js";
+import { AuditLog, Coupon, Order, Restaurant, Session, User } from "../models.js";
 import { requireRole, canAdmin, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
 import { toRestaurantDTO } from "./catalog.js";
@@ -9,6 +9,7 @@ import { isValidCoordinate } from "../lib/geo.js";
 import { emitToAdmin } from "../lib/realtime.js";
 import { notifyUser } from "../lib/push.js";
 import { unassignPartner } from "../lib/delivery.js";
+import { getPricingSettings, updatePricingSettings } from "../lib/pricingSettings.js";
 import { EMAIL_RE, PHONE_RE } from "../lib/http.js";
 
 export const adminRouter = Router();
@@ -682,5 +683,165 @@ adminRouter.get("/audit-logs", async (req, res) => {
     );
   } catch (e) {
     res.status(500).json(fail("AUDIT_LOG_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load the audit log"));
+  }
+});
+
+// --- Platform pricing & discounts ("admin can set the discount thing and
+// percentage things and everything should handle from admin only") --------
+
+adminRouter.get("/pricing-settings", async (_req, res) => {
+  try {
+    res.json(ok({ pricing: await getPricingSettings() }));
+  } catch (e) {
+    res.status(500).json(fail("PRICING_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load pricing settings"));
+  }
+});
+
+adminRouter.patch("/pricing-settings", async (req: AuthedRequest, res) => {
+  try {
+    const body = req.body ?? {};
+    const patch: Record<string, number> = {};
+    for (const field of ["deliveryFee", "platformFee", "taxRatePercent", "restaurantDiscountThreshold", "restaurantDiscountAmount"]) {
+      if (body[field] === undefined) continue;
+      const value = Number(body[field]);
+      if (!Number.isFinite(value) || value < 0) return res.status(400).json(fail("INVALID_VALUE", `${field} must be a non-negative number.`));
+      if (field === "taxRatePercent" && value > 100) return res.status(400).json(fail("INVALID_VALUE", "Tax rate cannot exceed 100%."));
+      patch[field] = value;
+    }
+    const before = await getPricingSettings();
+    const pricing = await updatePricingSettings(patch);
+    await audit(req, "pricing.update", "pricing_settings", "food", before, pricing);
+    res.json(ok({ pricing }, "Pricing updated"));
+  } catch (e) {
+    res.status(500).json(fail("PRICING_UPDATE_FAILED", e instanceof Error ? e.message : "Could not update pricing settings"));
+  }
+});
+
+// --- Coupons (platform-wide discount codes) --------------------------------
+
+const couponDTO = (c: any) => ({
+  id: String(c._id),
+  code: c.code,
+  title: c.title,
+  description: c.description,
+  type: c.type,
+  value: c.value,
+  minOrder: c.minOrder,
+  maxDiscount: c.maxDiscount ?? null,
+  active: c.active,
+});
+
+adminRouter.get("/coupons", async (_req, res) => {
+  try {
+    const coupons = await Coupon.find().sort({ createdAt: -1 }).lean();
+    res.json(ok({ coupons: coupons.map(couponDTO) }));
+  } catch (e) {
+    res.status(500).json(fail("COUPONS_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load coupons"));
+  }
+});
+
+adminRouter.post("/coupons", async (req: AuthedRequest, res) => {
+  try {
+    const body = req.body ?? {};
+    const code = String(body.code ?? "").trim().toUpperCase();
+    const type = String(body.type ?? "");
+    const value = Number(body.value);
+
+    if (code.length < 3) return res.status(400).json(fail("INVALID_CODE", "Enter a coupon code (at least 3 characters)."));
+    if (!["PERCENT", "FLAT", "FREE_DELIVERY"].includes(type)) return res.status(400).json(fail("INVALID_TYPE", "Type must be PERCENT, FLAT or FREE_DELIVERY."));
+    if (type !== "FREE_DELIVERY" && (!Number.isFinite(value) || value <= 0)) return res.status(400).json(fail("INVALID_VALUE", "Enter a discount value greater than 0."));
+    if (type === "PERCENT" && value > 100) return res.status(400).json(fail("INVALID_VALUE", "A percentage discount cannot exceed 100."));
+    if (await Coupon.exists({ code })) return res.status(409).json(fail("CODE_TAKEN", "A coupon with this code already exists."));
+
+    const coupon = await Coupon.create({
+      code,
+      title: body.title ?? code,
+      description: body.description ?? "",
+      type,
+      value: type === "FREE_DELIVERY" ? 0 : value,
+      minOrder: Number(body.minOrder) || 0,
+      maxDiscount: body.maxDiscount !== undefined && body.maxDiscount !== null && body.maxDiscount !== "" ? Number(body.maxDiscount) : null,
+      active: body.active !== false,
+    });
+
+    await audit(req, "coupon.create", "coupon", String(coupon._id), null, couponDTO(coupon.toObject()));
+    res.json(ok({ coupon: couponDTO(coupon.toObject()) }, "Coupon created"));
+  } catch (e) {
+    res.status(500).json(fail("COUPON_CREATE_FAILED", e instanceof Error ? e.message : "Could not create coupon"));
+  }
+});
+
+adminRouter.patch("/coupons/:id", async (req: AuthedRequest, res) => {
+  try {
+    const coupon = await Coupon.findById(req.params.id);
+    if (!coupon) return res.status(404).json(fail("COUPON_NOT_FOUND", "Coupon not found"));
+
+    const before = couponDTO(coupon.toObject());
+    const body = req.body ?? {};
+    if (body.title !== undefined) coupon.title = body.title;
+    if (body.description !== undefined) coupon.description = body.description;
+    if (body.value !== undefined) {
+      const value = Number(body.value);
+      if (!Number.isFinite(value) || value < 0) return res.status(400).json(fail("INVALID_VALUE", "Enter a valid discount value."));
+      if (coupon.type === "PERCENT" && value > 100) return res.status(400).json(fail("INVALID_VALUE", "A percentage discount cannot exceed 100."));
+      coupon.value = value;
+    }
+    if (body.minOrder !== undefined) coupon.minOrder = Number(body.minOrder) || 0;
+    if (body.maxDiscount !== undefined) (coupon as any).maxDiscount = body.maxDiscount === null || body.maxDiscount === "" ? null : Number(body.maxDiscount);
+    if (typeof body.active === "boolean") coupon.active = body.active;
+
+    await coupon.save();
+    await audit(req, "coupon.edit", "coupon", req.params.id, before, couponDTO(coupon.toObject()));
+    res.json(ok({ coupon: couponDTO(coupon.toObject()) }, "Coupon updated"));
+  } catch (e) {
+    res.status(500).json(fail("COUPON_UPDATE_FAILED", e instanceof Error ? e.message : "Could not update coupon"));
+  }
+});
+
+adminRouter.delete("/coupons/:id", async (req: AuthedRequest, res) => {
+  try {
+    const coupon = await Coupon.findByIdAndDelete(req.params.id);
+    if (!coupon) return res.status(404).json(fail("COUPON_NOT_FOUND", "Coupon not found"));
+    await audit(req, "coupon.delete", "coupon", req.params.id, couponDTO(coupon.toObject()), null);
+    res.json(ok({ deleted: true }, "Coupon deleted"));
+  } catch (e) {
+    res.status(500).json(fail("COUPON_DELETE_FAILED", e instanceof Error ? e.message : "Could not delete coupon"));
+  }
+});
+
+// --- Per-restaurant offers ("50% OFF", "FREE DELIVERY" banners) ------------
+
+adminRouter.post("/restaurants/:id/offers", async (req: AuthedRequest, res) => {
+  try {
+    const title = String(req.body?.title ?? "").trim();
+    if (title.length < 2) return res.status(400).json(fail("INVALID_TITLE", "Enter an offer title."));
+
+    const restaurant = await Restaurant.findByIdAndUpdate(
+      req.params.id,
+      { $push: { offers: { title, description: req.body?.description ?? null } } },
+      { new: true },
+    );
+    if (!restaurant) return res.status(404).json(fail("RESTAURANT_NOT_FOUND", "Restaurant not found"));
+
+    await audit(req, "offer.create", "restaurant", req.params.id, null, { title });
+    res.json(ok({ restaurant: toRestaurantDTO(restaurant.toObject()) }, "Offer added"));
+  } catch (e) {
+    res.status(500).json(fail("OFFER_CREATE_FAILED", e instanceof Error ? e.message : "Could not add this offer"));
+  }
+});
+
+adminRouter.delete("/restaurants/:id/offers/:offerId", async (req: AuthedRequest, res) => {
+  try {
+    const restaurant = await Restaurant.findByIdAndUpdate(
+      req.params.id,
+      { $pull: { offers: { _id: req.params.offerId } } },
+      { new: true },
+    );
+    if (!restaurant) return res.status(404).json(fail("RESTAURANT_NOT_FOUND", "Restaurant not found"));
+
+    await audit(req, "offer.delete", "restaurant", req.params.id, { offerId: req.params.offerId }, null);
+    res.json(ok({ restaurant: toRestaurantDTO(restaurant.toObject()) }, "Offer removed"));
+  } catch (e) {
+    res.status(500).json(fail("OFFER_DELETE_FAILED", e instanceof Error ? e.message : "Could not remove this offer"));
   }
 });

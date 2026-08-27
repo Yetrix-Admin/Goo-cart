@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuditLog, Coupon, FoodItem, Order, Restaurant, User, nextSequence } from "../models.js";
 import { calculateBill, type CouponRule } from "../lib/pricing.js";
+import { getPricingSettings } from "../lib/pricingSettings.js";
 import { canTransition, generateOrderNumber, generateOtp, TERMINAL_STATUSES, type OrderStatus } from "../lib/orderState.js";
 import { canAdmin, canPartner, canVendor, hasVendorPermission, requireAuth, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
@@ -127,7 +128,8 @@ ordersRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
 
     const lines = await priceLines(String(restaurant._id), body.items);
     const coupon = await resolveCoupon(body.couponCode);
-    const bill = calculateBill(lines, coupon, Number(body.tip) || 0);
+    const pricingSettings = await getPricingSettings();
+    const bill = calculateBill(lines, coupon, Number(body.tip) || 0, pricingSettings);
 
     const orderNumber = generateOrderNumber(await nextSequence("orderNumber"));
     const now = new Date();

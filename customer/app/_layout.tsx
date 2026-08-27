@@ -10,6 +10,7 @@ import { useFavoritesStore } from "@/store/useFavoritesStore";
 import { useAddressStore } from "@/store/useAddressStore";
 import { useRatingStore } from "@/store/useRatingStore";
 import { useCatalogStore } from "@/store/useCatalogStore";
+import { usePricingStore } from "@/store/usePricingStore";
 import { useCartStore } from "@/store/useCartStore";
 
 export default function RootLayout() {
@@ -23,6 +24,7 @@ export default function RootLayout() {
     void useAddressStore.getState().hydrate();
     void useRatingStore.getState().hydrate();
     void useCatalogStore.getState().load();
+    void usePricingStore.getState().load();
     void useCartStore.getState().hydrate();
   }, []);
 

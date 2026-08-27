@@ -11,7 +11,7 @@ type Snapshot = { actor:PlatformUser; products:Product[]; orders:Order[]; offers
 type ApiResult = { success:boolean; data?:Snapshot; error?:{code?:string;message:string}; message?:string|null };
 type ErrorState = { code:string; message:string };
 
-const adminNav:string[] = ["Dashboard","Live Orders","Live Operations","Orders","Rides","Parcels","Vendors","Delivery Partners","Customers","Catalog","Finance","Support","Reports","Settings"];
+const adminNav:string[] = ["Dashboard","Live Orders","Live Operations","Orders","Rides","Parcels","Vendors","Delivery Partners","Customers","Catalog","Discounts & Pricing","Finance","Support","Reports","Settings"];
 const commerce:Service[] = ["Food","Grocery","Vegetables","Mart"];
 const money = (value:number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
 const label = (value:string) => value.replaceAll("_"," ").toLowerCase().replace(/\b\w/g,(x)=>x.toUpperCase());
@@ -87,11 +87,11 @@ function Kpis({items}:{items:[string,string,string][]}){return <section classNam
 function OrdersTable({orders,act,busy}:{orders:Order[];act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){return <div className="ops-table"><div className="ops-row ops-head"><span>REFERENCE</span><span>DETAILS</span><span>STATUS</span><span>VALUE</span><span>ACTION</span></div>{orders.map((o)=><div className="ops-row" key={o.id}><b>{o.reference}</b><span>{o.vendor}<small>{o.service} • {orderSummary(o)}</small></span><Status value={o.status}/><strong>{money(o.total)}</strong><OrderAction order={o} act={act} busy={busy}/></div>)}{!orders.length&&<Empty title="No matching work" copy="New activity will appear here automatically."/>}</div>}
 function OrderAction({order,act,busy}:{order:Order;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){if(terminalStatuses.includes(order.status))return null;return <div className="row-actions"><button className="danger" disabled={busy} onClick={()=>void act({action:"order.transition",id:order.id,to:"CANCELLED_BY_ADMIN"})}>Cancel</button></div>}
 
-function Admin({state,act,busy}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){const [page,setPage]=useState("Dashboard");const orders=state.orders;const gmv=orders.reduce((s,x)=>s+x.total,0);const active=orders.filter((x)=>!terminalStatuses.includes(x.status));const rides=orders.filter((x)=>x.service==="Bike Taxi");const parcels=orders.filter((x)=>x.service==="Parcel");return <Shell page={page} setPage={setPage} state={state}>{page==="Dashboard"&&<><div className="overview"><span><small>Command center</small><h2>Operations at a glance.</h2></span><b>LIVE DATA</b></div><Kpis items={[[money(gmv),"Total GMV","All services"],[String(orders.length),"Total orders & jobs","Live"],[String(active.length),"Active operations","Now"],[String(state.services.filter((x)=>x.enabled).length),"Enabled services","of 6"]]}/><section className="panel"><div><span><h2>Live operations</h2><small>Customer, vendor and partner activity</small></span></div><OrdersTable orders={active.slice(0,7)} act={act} busy={busy}/></section></>}{page==="Live Orders"&&<AdminLiveOrders/>}{["Live Operations","Orders"].includes(page)&&<WorkspacePage eyebrow="REALTIME OPERATIONS" title={page} copy="Monitor status and intervene when necessary."><OrdersTable orders={page==="Orders"?orders:active} act={act} busy={busy}/></WorkspacePage>}{page==="Rides"&&<WorkspacePage eyebrow="RIDE ENGINE" title="Bike taxi" copy="Ride requests, driver assignments and completions."><OrdersTable orders={rides} act={act} busy={busy}/></WorkspacePage>}{page==="Parcels"&&<WorkspacePage eyebrow="PARCEL ENGINE" title="Parcel operations" copy="Pickup, transit and delivery verification."><OrdersTable orders={parcels} act={act} busy={busy}/></WorkspacePage>}{page==="Catalog"&&<AdminCatalog state={state} act={act} busy={busy}/>} {page==="Settings"&&<AdminSettings state={state} act={act}/>} {page==="Finance"&&<StatsPage title="Platform finance" stats={[["Gross merchandise value",money(gmv)],["Platform revenue",money(gmv*.18)],["Vendor payable",money(gmv*.82)]]}/>} {page==="Vendors"&&<AdminVendors/>} {page==="Delivery Partners"&&<AdminPartners/>} {page==="Customers"&&<AdminCustomers/>} {page==="Support"&&<Directory title="Support tickets" rows={[["#TKT-1042","Order delayed","Open"],["#TKT-1039","Payment issue","In progress"],["#TKT-1034","Missing item","Resolved"]]}/>} {page==="Reports"&&<StatsPage title="Performance reports" stats={commerce.map((x)=>[x,`${orders.filter((o)=>o.service===x).length} orders`])}/>}</Shell>}
+function Admin({state,act,busy}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){const [page,setPage]=useState("Dashboard");const orders=state.orders;const gmv=orders.reduce((s,x)=>s+x.total,0);const active=orders.filter((x)=>!terminalStatuses.includes(x.status));const rides=orders.filter((x)=>x.service==="Bike Taxi");const parcels=orders.filter((x)=>x.service==="Parcel");return <Shell page={page} setPage={setPage} state={state}>{page==="Dashboard"&&<><div className="overview"><span><small>Command center</small><h2>Operations at a glance.</h2></span><b>LIVE DATA</b></div><Kpis items={[[money(gmv),"Total GMV","All services"],[String(orders.length),"Total orders & jobs","Live"],[String(active.length),"Active operations","Now"],[String(state.services.filter((x)=>x.enabled).length),"Enabled services","of 6"]]}/><section className="panel"><div><span><h2>Live operations</h2><small>Customer, vendor and partner activity</small></span></div><OrdersTable orders={active.slice(0,7)} act={act} busy={busy}/></section></>}{page==="Live Orders"&&<AdminLiveOrders/>}{["Live Operations","Orders"].includes(page)&&<WorkspacePage eyebrow="REALTIME OPERATIONS" title={page} copy="Monitor status and intervene when necessary."><OrdersTable orders={page==="Orders"?orders:active} act={act} busy={busy}/></WorkspacePage>}{page==="Rides"&&<WorkspacePage eyebrow="RIDE ENGINE" title="Bike taxi" copy="Ride requests, driver assignments and completions."><OrdersTable orders={rides} act={act} busy={busy}/></WorkspacePage>}{page==="Parcels"&&<WorkspacePage eyebrow="PARCEL ENGINE" title="Parcel operations" copy="Pickup, transit and delivery verification."><OrdersTable orders={parcels} act={act} busy={busy}/></WorkspacePage>}{page==="Catalog"&&<AdminCatalog state={state} act={act} busy={busy}/>} {page==="Discounts & Pricing"&&<AdminDiscounts/>} {page==="Settings"&&<AdminSettings state={state} act={act}/>} {page==="Finance"&&<StatsPage title="Platform finance" stats={[["Gross merchandise value",money(gmv)],["Platform revenue",money(gmv*.18)],["Vendor payable",money(gmv*.82)]]}/>} {page==="Vendors"&&<AdminVendors/>} {page==="Delivery Partners"&&<AdminPartners/>} {page==="Customers"&&<AdminCustomers/>} {page==="Support"&&<Directory title="Support tickets" rows={[["#TKT-1042","Order delayed","Open"],["#TKT-1039","Payment issue","In progress"],["#TKT-1034","Missing item","Resolved"]]}/>} {page==="Reports"&&<StatsPage title="Performance reports" stats={commerce.map((x)=>[x,`${orders.filter((o)=>o.service===x).length} orders`])}/>}</Shell>}
 function AdminCatalog({state,act,busy}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){return <WorkspacePage eyebrow="CATALOG & INVENTORY" title="All products" copy="Live price, stock and service availability."><div className="inventory-list">{state.products.map((p)=><article key={p.id}><i>{p.name[0]}</i><span><small>{p.service} • {p.vendor}</small><h3>{p.name}</h3><p>{money(p.price)} • ★ {p.rating}</p></span><b className={p.stock<15?"low-stock":""}>{p.stock} stock</b><div className="qty"><button disabled={busy} onClick={()=>void act({action:"stock.adjust",id:p.id,amount:-1})}>−</button><button disabled={busy} onClick={()=>void act({action:"stock.adjust",id:p.id,amount:5})}>+5</button></div></article>)}</div></WorkspacePage>}
 function AdminSettings({state,act}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>}){return <WorkspacePage eyebrow="SERVICE AREA" title="Jangareddigudem" copy="Enable services independently for this operating area."><div className="setting-list">{state.services.map((s)=><article key={s.service}><i>{s.service[0]}</i><span><b>{s.service}</b><small>{s.enabled?"Available to customers":"Temporarily unavailable"}</small></span><button className={s.enabled?"toggle on":"toggle"} onClick={()=>void act({action:"service.toggle",service:s.service,enabled:!s.enabled})}><i/></button></article>)}</div></WorkspacePage>}
 
-type AdminRestaurant = { id:string; name:string; area:string; isOpen:boolean; status:string; manualOrderAcceptance:boolean; owner:{id:string;name:string;email:string}|null };
+type AdminRestaurant = { id:string; name:string; area:string; isOpen:boolean; status:string; manualOrderAcceptance:boolean; owner:{id:string;name:string;email:string}|null; offers:{id:string;title:string;description:string|null}[] };
 type AdminVendorUser = { id:string; name:string; email:string; role:string; status:string };
 type AdminVendorTeamMember = { id:string; name:string; email:string; phone:string|null; role:string; status:string; staffTitle:string|null; isPrimaryOwner:boolean; permissions:string[] };
 async function adminApi<T>(path:string,init?:RequestInit):Promise<T>{const res=await fetch(`/api/v1/admin${path}`,{...init,headers:{"content-type":"application/json",...init?.headers}});const json=await res.json() as {success:boolean;data?:T;error?:{message:string}};if(!json.success||!json.data)throw new Error(json.error?.message||"Request failed");return json.data;}
@@ -105,6 +105,7 @@ function AdminVendors(){
   const [error,setError]=useState("");
   const [showCreate,setShowCreate]=useState(false);
   const [expanded,setExpanded]=useState<string|null>(null);
+  const [expandedOffers,setExpandedOffers]=useState<string|null>(null);
   const load=useCallback(async()=>{try{const [r,v]=await Promise.all([adminApi<{restaurants:AdminRestaurant[]}>("/restaurants"),adminApi<{vendors:AdminVendorUser[]}>("/vendors")]);setRestaurants(r.restaurants);setVendors(v.vendors);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load vendors");}},[]);
   useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
   const assign=async(restaurantId:string,userId:string)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/owner`,{method:"PATCH",body:JSON.stringify({userId:userId||null})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not assign owner");}finally{setBusy(false);}};
@@ -130,8 +131,10 @@ function AdminVendors(){
           {vendors.map((v)=><option key={v.id} value={v.id}>{v.name} ({v.email})</option>)}
         </select>
         <button className="secondary" onClick={()=>setExpanded(expanded===r.id?null:r.id)}>{expanded===r.id?"Hide team":"Manage team"}</button>
+        <button className="secondary" onClick={()=>setExpandedOffers(expandedOffers===r.id?null:r.id)}>{expandedOffers===r.id?"Hide offers":`Manage offers (${r.offers.length})`}</button>
       </div>
       {expanded===r.id&&<VendorTeamPanel restaurantId={r.id}/>}
+      {expandedOffers===r.id&&<VendorOffersPanel restaurantId={r.id} offers={r.offers} onChange={load}/>}
     </article>)}</div>}
   </WorkspacePage>;
 }
@@ -233,6 +236,40 @@ function AddVendorUserForm({restaurantId,onCreated}:{restaurantId:string;onCreat
     {error&&<p className="auth-error">{error}</p>}
     <button className="primary" disabled={busy}>{busy?"Creating…":"Create vendor user"}</button>
   </form>;
+}
+
+function VendorOffersPanel({restaurantId,offers,onChange}:{restaurantId:string;offers:{id:string;title:string;description:string|null}[];onChange:()=>Promise<void>}){
+  const [showAdd,setShowAdd]=useState(false);
+  const [form,setForm]=useState({title:"",description:""});
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+
+  const add=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
+    try{
+      await adminApi(`/restaurants/${restaurantId}/offers`,{method:"POST",body:JSON.stringify({title:form.title,description:form.description||null})});
+      setForm({title:"",description:""});setShowAdd(false);await onChange();
+    }catch(e){setError(e instanceof Error?e.message:"Could not add this offer");}finally{setBusy(false);}
+  };
+  const remove=async(offerId:string)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/offers/${offerId}`,{method:"DELETE"});await onChange();}catch(e){setError(e instanceof Error?e.message:"Could not remove this offer");}finally{setBusy(false);}};
+
+  return <div className="team-panel">
+    {error&&<p className="auth-error">{error}</p>}
+    {!offers.length?<p className="muted-note">No offers on this restaurant yet.</p>:
+      <div className="team-list">{offers.map((o)=><div key={o.id} className="team-member">
+        <div className="team-member-head">
+          <b>{o.title}</b>{o.description?<small>{o.description}</small>:null}
+        </div>
+        <div className="team-member-actions">
+          <button className="secondary danger-text" disabled={busy} onClick={()=>void remove(o.id)}>Remove</button>
+        </div>
+      </div>)}</div>}
+    <PrimaryActionButton label={showAdd?"Cancel":"+ Add Offer"} onClick={()=>setShowAdd(!showAdd)}/>
+    {showAdd&&<form className="auth-form inline-form" onSubmit={(e)=>void add(e)}>
+      <label>{'Offer title (e.g. "50% OFF")'}<input required value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></label>
+      <label>Description (optional)<input value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label>
+      <button className="primary" disabled={busy}>{busy?"Adding…":"Add offer"}</button>
+    </form>}
+  </div>;
 }
 
 type AdminCustomerRow = { id:string; name:string; email:string; phone:string|null; status:string; joinedAt:string; orders:number; completedOrders:number; cancelledOrders:number; totalSpend:number; lastOrderAt:string|null };
@@ -360,6 +397,118 @@ function AdminOrderDetail({orderId}:{orderId:string}){
       </div>
     </div>
   </div>;
+}
+
+type AdminPricingSettings = { deliveryFee:number; platformFee:number; taxRatePercent:number; restaurantDiscountThreshold:number; restaurantDiscountAmount:number };
+type AdminCoupon = { id:string; code:string; title:string; description:string; type:"PERCENT"|"FLAT"|"FREE_DELIVERY"; value:number; minOrder:number; maxDiscount:number|null; active:boolean };
+
+function AdminDiscounts(){
+  return <WorkspacePage eyebrow="MONEY & PROMOTIONS" title="Discounts & Pricing" copy="Every fee, tax rate and discount code the app charges — nothing here needs a redeploy to change.">
+    <PricingSettingsPanel/>
+    <div style={{height:28}}/>
+    <CouponsPanel/>
+  </WorkspacePage>;
+}
+
+function PricingSettingsPanel(){
+  const [pricing,setPricing]=useState<AdminPricingSettings|null>(null);
+  const [form,setForm]=useState<AdminPricingSettings|null>(null);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const [saved,setSaved]=useState(false);
+  const load=useCallback(async()=>{try{const r=await adminApi<{pricing:AdminPricingSettings}>("/pricing-settings");setPricing(r.pricing);setForm(r.pricing);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load pricing settings");}},[]);
+  useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
+
+  const save=async(e:React.FormEvent)=>{
+    e.preventDefault();
+    if(!form)return;
+    setBusy(true);setError("");setSaved(false);
+    try{
+      const r=await adminApi<{pricing:AdminPricingSettings}>("/pricing-settings",{method:"PATCH",body:JSON.stringify(form)});
+      setPricing(r.pricing);setForm(r.pricing);setSaved(true);setTimeout(()=>setSaved(false),2500);
+    }catch(e){setError(e instanceof Error?e.message:"Could not save pricing settings");}finally{setBusy(false);}
+  };
+
+  if(!form)return <div className="inline-form"><p className="muted-note">{error||"Loading pricing settings…"}</p></div>;
+
+  return <form className="auth-form inline-form" onSubmit={(e)=>void save(e)}>
+    <h4 style={{margin:"0 0 4px",fontSize:11}}>Platform fees & tax</h4>
+    <div className="permission-grid" style={{gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))"}}>
+      <label>Delivery fee (₹)<input type="number" min={0} step="1" value={form.deliveryFee} onChange={(e)=>setForm({...form,deliveryFee:Number(e.target.value)})}/></label>
+      <label>Platform fee (₹)<input type="number" min={0} step="1" value={form.platformFee} onChange={(e)=>setForm({...form,platformFee:Number(e.target.value)})}/></label>
+      <label>Tax rate (%)<input type="number" min={0} max={100} step="0.1" value={form.taxRatePercent} onChange={(e)=>setForm({...form,taxRatePercent:Number(e.target.value)})}/></label>
+      <label>Restaurant discount threshold (₹)<input type="number" min={0} step="1" value={form.restaurantDiscountThreshold} onChange={(e)=>setForm({...form,restaurantDiscountThreshold:Number(e.target.value)})}/></label>
+      <label>Restaurant discount amount (₹)<input type="number" min={0} step="1" value={form.restaurantDiscountAmount} onChange={(e)=>setForm({...form,restaurantDiscountAmount:Number(e.target.value)})}/></label>
+    </div>
+    <p className="muted-note">Orders above the threshold automatically get the discount amount taken off — this is separate from coupon codes below.</p>
+    {error&&<p className="auth-error">{error}</p>}
+    {saved&&<p className="muted-note" style={{color:"#247340"}}>Saved — every new order uses these values immediately.</p>}
+    <button className="primary" disabled={busy || JSON.stringify(form)===JSON.stringify(pricing)}>{busy?"Saving…":"Save pricing"}</button>
+  </form>;
+}
+
+function CouponsPanel(){
+  const [coupons,setCoupons]=useState<AdminCoupon[]|null>(null);
+  const [showCreate,setShowCreate]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const load=useCallback(async()=>{try{const r=await adminApi<{coupons:AdminCoupon[]}>("/coupons");setCoupons(r.coupons);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load coupons");}},[]);
+  useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
+
+  const toggleActive=async(c:AdminCoupon)=>{setBusy(true);try{await adminApi(`/coupons/${c.id}`,{method:"PATCH",body:JSON.stringify({active:!c.active})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update coupon");}finally{setBusy(false);}};
+  const remove=async(c:AdminCoupon)=>{if(!confirm(`Delete coupon ${c.code}?`))return;setBusy(true);try{await adminApi(`/coupons/${c.id}`,{method:"DELETE"});await load();}catch(e){setError(e instanceof Error?e.message:"Could not delete coupon");}finally{setBusy(false);}};
+
+  const describe=(c:AdminCoupon)=>c.type==="FREE_DELIVERY"?"Free delivery":c.type==="PERCENT"?`${c.value}% off${c.maxDiscount?` up to ₹${c.maxDiscount}`:""}`:`₹${c.value} off`;
+
+  return <div>
+    <h4 style={{margin:"0 0 10px",fontSize:11}}>Coupon codes</h4>
+    {error&&<p className="auth-error">{error}</p>}
+    <PrimaryActionButton label={showCreate?"Cancel":"+ Create Coupon"} onClick={()=>setShowCreate(!showCreate)}/>
+    {showCreate&&<CreateCouponForm onCreated={()=>{setShowCreate(false);void load();}}/>}
+    {coupons===null?<Empty title="Loading…" copy="Fetching coupons."/>:!coupons.length?<Empty title="No coupons yet" copy="Create one above to offer customers a discount code."/>:
+    <div className="directory">{coupons.map((c)=><article key={c.id}>
+      <i>%</i>
+      <span><b>{c.code}</b><small>{describe(c)}{c.minOrder>0?` • min order ₹${c.minOrder}`:""}{c.title&&c.title!==c.code?` • ${c.title}`:""}</small></span>
+      <span className={`status status-${c.active?"active":"suspended"}`}>● {c.active?"Active":"Inactive"}</span>
+      <button className="secondary" disabled={busy} onClick={()=>void toggleActive(c)}>{c.active?"Deactivate":"Activate"}</button>
+      <button className="secondary danger-text" disabled={busy} onClick={()=>void remove(c)}>Delete</button>
+    </article>)}</div>}
+  </div>;
+}
+
+function CreateCouponForm({onCreated}:{onCreated:()=>void}){
+  const [form,setForm]=useState({code:"",title:"",type:"PERCENT" as AdminCoupon["type"],value:"10",minOrder:"0",maxDiscount:""});
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
+    try{
+      await adminApi("/coupons",{method:"POST",body:JSON.stringify({
+        code:form.code,
+        title:form.title||form.code,
+        type:form.type,
+        value:form.type==="FREE_DELIVERY"?0:Number(form.value),
+        minOrder:Number(form.minOrder)||0,
+        maxDiscount:form.maxDiscount?Number(form.maxDiscount):null,
+      })});
+      onCreated();
+    }catch(e){setError(e instanceof Error?e.message:"Could not create this coupon");}finally{setBusy(false);}
+  };
+  return <form className="auth-form inline-form" onSubmit={(e)=>void submit(e)}>
+    <label>Code<input required value={form.code} onChange={(e)=>setForm({...form,code:e.target.value.toUpperCase()})}/></label>
+    <label>Title (optional)<input value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></label>
+    <label>Type
+      <select value={form.type} onChange={(e)=>setForm({...form,type:e.target.value as AdminCoupon["type"]})}>
+        <option value="PERCENT">Percentage off</option>
+        <option value="FLAT">Flat amount off</option>
+        <option value="FREE_DELIVERY">Free delivery</option>
+      </select>
+    </label>
+    {form.type!=="FREE_DELIVERY"&&<label>{form.type==="PERCENT"?"Percent off":"Amount off (₹)"}<input required type="number" min="1" value={form.value} onChange={(e)=>setForm({...form,value:e.target.value})}/></label>}
+    <label>Minimum order (₹)<input type="number" min="0" value={form.minOrder} onChange={(e)=>setForm({...form,minOrder:e.target.value})}/></label>
+    {form.type==="PERCENT"&&<label>Max discount cap (₹, optional)<input type="number" min="0" value={form.maxDiscount} onChange={(e)=>setForm({...form,maxDiscount:e.target.value})}/></label>}
+    {error&&<p className="auth-error">{error}</p>}
+    <button className="primary" disabled={busy}>{busy?"Creating…":"Create coupon"}</button>
+  </form>;
 }
 
 function WorkspacePage({eyebrow,title,copy,children}:{eyebrow:string;title:string;copy:string;children:React.ReactNode}){return <section className="workspace-page"><div className="page-head"><small>{eyebrow}</small><h1>{title}</h1><p>{copy}</p></div>{children}</section>}

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { Coupon, FoodItem, Restaurant } from "../models.js";
 import { ok, fail } from "../lib/http.js";
+import { getPricingSettings } from "../lib/pricingSettings.js";
 
 export const catalogRouter = Router();
 
@@ -24,7 +25,7 @@ function toRestaurantDTO(r: any) {
     area: r.area,
     latitude: r.latitude,
     longitude: r.longitude,
-    offers: (r.offers ?? []).map((o: any) => ({ title: o.title, description: o.description ?? null })),
+    offers: (r.offers ?? []).map((o: any) => ({ id: String(o._id), title: o.title, description: o.description ?? null })),
     manualOrderAcceptance: r.manualOrderAcceptance !== false,
     status: r.status ?? "ACTIVE",
   };
@@ -148,6 +149,18 @@ catalogRouter.get("/coupons", async (_req, res) => {
     );
   } catch (e) {
     res.status(500).json(fail("COUPONS_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load coupons"));
+  }
+});
+
+// Read-only, public: so the app can show the customer the fees/discount
+// rule that will actually be charged (admin-controlled — see
+// admin.ts's /pricing-settings) instead of a value baked into the client.
+catalogRouter.get("/pricing-settings", async (_req, res) => {
+  try {
+    const settings = await getPricingSettings();
+    res.json(ok({ pricing: settings }));
+  } catch (e) {
+    res.status(500).json(fail("PRICING_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load pricing"));
   }
 });
 
