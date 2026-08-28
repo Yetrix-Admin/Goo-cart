@@ -48,13 +48,20 @@ async function handleSignup(req: Request, res: Response) {
     const email = String(req.body?.email ?? "").trim().toLowerCase();
     const password = String(req.body?.password ?? "");
     const name = String(req.body?.name ?? "").trim();
+    // Optional here — the Customer app's own signup form requires it and
+    // validates before ever calling this route, but the admin web portal's
+    // signup (app/page.tsx, same route) has never collected a phone number,
+    // and must keep working unchanged.
+    const phone = req.body?.phone !== undefined ? String(req.body.phone).trim() : undefined;
 
     if (!EMAIL_RE.test(email)) return res.status(400).json(fail("INVALID_EMAIL", "Enter a valid email address"));
+    if (phone && !PHONE_RE.test(phone)) return res.status(400).json(fail("INVALID_PHONE", "Enter a valid mobile number"));
     if (password.length < 8) return res.status(400).json(fail("WEAK_PASSWORD", "Password must be at least 8 characters"));
     if (name.length < 2) return res.status(400).json(fail("INVALID_NAME", "Enter your full name"));
     if (await User.exists({ email })) return res.status(409).json(fail("EMAIL_TAKEN", "An account with this email already exists"));
+    if (phone && (await User.exists({ phone }))) return res.status(409).json(fail("PHONE_TAKEN", "An account with this mobile number already exists"));
 
-    const user = await User.create({ email, name, passwordHash: await hashPassword(password), role: defaultRoleForEmail(email), status: "ACTIVE" });
+    const user = await User.create({ email, ...(phone ? { phone } : {}), name, passwordHash: await hashPassword(password), role: defaultRoleForEmail(email), status: "ACTIVE" });
     const token = await createSession(user._id, { ip: req.ip, userAgent: req.header("user-agent") });
     setSessionCookie(res, token);
     res.json(ok({ user: publicUser(user), token }, "Account created"));

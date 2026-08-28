@@ -1,13 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
-import { apiPost, ApiError, markAuthReady, setAuthToken } from "@/services/apiClient";
+import { apiPost, markAuthReady, setAuthToken } from "@/services/apiClient";
 import { registerForPushNotifications } from "@/services/PushService";
 import { VendorUser } from "@/types";
 
 const STORAGE_KEY = "goocart.vendor.auth.v1";
 const VENDOR_ROLES = ["VENDOR_OWNER", "VENDOR_MANAGER", "VENDOR_STAFF"];
-
-export type OtpPurpose = "LOGIN" | "SIGNUP";
 
 type StoredAuth = { token: string; user: VendorUser };
 
@@ -16,15 +14,8 @@ type AuthState = {
   token: string | null;
   hasHydrated: boolean;
   hydrate: () => Promise<void>;
-  /** Legacy path for the original owner accounts created before admin-managed vendor users existed. */
+  /** Every vendor account (owner or admin-created staff) signs in with the password admin set for them. */
   signIn: (email: string, password: string) => Promise<void>;
-  /**
-   * The normal path for anyone admin created via Admin → Vendors → Vendor
-   * Users: they have no password, only an OTP sent to the email/phone the
-   * admin registered for them (spec section 13).
-   */
-  requestOtp: (identifier: string) => Promise<{ delivered: boolean; message: string }>;
-  verifyOtp: (identifier: string, code: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -65,23 +56,6 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   signIn: async (email, password) => {
     const data = await apiPost<TokenResponse>("/api/v1/auth/token", { mode: "login", email, password });
-    await persist(data, set);
-  },
-
-  requestOtp: async (identifier) => {
-    try {
-      const data = await apiPost<{ delivered: boolean }>("/api/v1/auth/otp/request", { identifier, purpose: "LOGIN" });
-      return { delivered: data.delivered, message: data.delivered ? "Code sent" : "Delivery is not configured — check the server log for the code" };
-    } catch (e) {
-      if (e instanceof ApiError && e.code === "ACCOUNT_NOT_FOUND") {
-        throw new Error("No vendor account found for this email/number. Ask your admin to create one first.");
-      }
-      throw e;
-    }
-  },
-
-  verifyOtp: async (identifier, code) => {
-    const data = await apiPost<TokenResponse>("/api/v1/auth/otp/verify", { identifier, purpose: "LOGIN", code });
     await persist(data, set);
   },
 
