@@ -12,6 +12,7 @@ import { useSelectedAddress } from "@/store/useAddressStore";
 import { useOrderStore } from "@/store/useOrderStore";
 import { PaymentMethod, Restaurant } from "@/types";
 import { restaurantService } from "@/services/RestaurantService";
+import { ApiError } from "@/services/apiClient";
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   UPI: "UPI",
@@ -23,12 +24,15 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
   WALLET: "Wallet",
   COD: "Cash on Delivery",
 };
+const PAYMENT_METHOD_IDS = Object.keys(METHOD_LABEL) as PaymentMethod[];
 
 type Stage = "idle" | "processing" | "failed" | "creating" | "create_failed";
 
 export default function PaymentScreen() {
   const { method } = useLocalSearchParams<{ method: PaymentMethod }>();
+  const selectedMethod: PaymentMethod = PAYMENT_METHOD_IDS.includes(method as PaymentMethod) ? (method as PaymentMethod) : "UPI";
   const [stage, setStage] = useState<Stage>("idle");
+  const [error, setError] = useState("");
   // Generated once per visit to this screen and reused across every retry
   // for this same checkout attempt — a double-tap or a retry after a
   // dropped response resolves to the one order the backend already created
@@ -64,10 +68,12 @@ export default function PaymentScreen() {
 
   const placeOrder = async () => {
     if (!restaurantId || !restaurant || !address || items.length === 0) {
+      setError(!address ? "Add or select a delivery address before placing the order." : "Your cart or restaurant details are no longer available. Please refresh and try again.");
       setStage("create_failed");
       return;
     }
     setStage("creating");
+    setError("");
     try {
       const order = await createOrder({
         restaurantId: restaurant.id,
@@ -76,12 +82,13 @@ export default function PaymentScreen() {
         instructions,
         couponCode: couponCode ?? undefined,
         tip: bill.tip,
-        paymentMethod: method,
+        paymentMethod: selectedMethod,
         idempotencyKey,
       });
       clearCart();
       router.replace({ pathname: "/orders/[id]/confirmation", params: { id: order.id } });
-    } catch {
+    } catch (e) {
+      setError(e instanceof ApiError || e instanceof Error ? e.message : "We couldn't place your order. Please try again.");
       setStage("create_failed");
     }
   };
@@ -105,7 +112,7 @@ export default function PaymentScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]}>
         <ScreenHeader title="Payment" />
-        <EmptyState icon="alert" title="Order creation failed" copy="We couldn't place your order. Your payment method was not charged." />
+        <EmptyState icon="alert" title="Order creation failed" copy={error || "We couldn't place your order. Your payment method was not charged."} />
         <View style={styles.footer}>
           <PrimaryButton label="Try Again" onPress={() => setStage("idle")} />
         </View>
@@ -132,14 +139,14 @@ export default function PaymentScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <ScreenHeader title="Payment" subtitle={METHOD_LABEL[method] ?? method} />
+      <ScreenHeader title="Payment" subtitle={METHOD_LABEL[selectedMethod]} />
       <View style={styles.content}>
         <View style={styles.card}>
-          <Text style={typography.h3}>Paying via {METHOD_LABEL[method] ?? method}</Text>
+          <Text style={typography.h3}>Paying via {METHOD_LABEL[selectedMethod]}</Text>
           <Text style={styles.copy}>Amount to pay: ₹{bill.total}</Text>
         </View>
 
-        {method === "COD" ? (
+        {selectedMethod === "COD" ? (
           <Text style={styles.copy}>Pay in cash when your order is delivered. No online payment is required.</Text>
         ) : (
           <View style={styles.demoBox}>
@@ -150,7 +157,7 @@ export default function PaymentScreen() {
       </View>
 
       <View style={[styles.footer, { gap: spacing.sm }]}>
-        {method === "COD" ? (
+        {selectedMethod === "COD" ? (
           <PrimaryButton label={`Place Order • ₹${bill.total}`} onPress={simulateSuccess} />
         ) : (
           <>

@@ -7,7 +7,7 @@ import { PrimaryButton } from "@/components/PrimaryButton";
 import { AddressCard } from "@/components/AddressCard";
 import { colors, radius, spacing, typography } from "@/theme";
 import { useCartBill, useCartItemCount, useCartStore } from "@/store/useCartStore";
-import { useAddressStore } from "@/store/useAddressStore";
+import { useSelectedAddress } from "@/store/useAddressStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { PaymentMethod, Restaurant } from "@/types";
 import { restaurantService } from "@/services/RestaurantService";
@@ -32,8 +32,8 @@ export default function CheckoutScreen() {
   const instructions = useCartStore((s) => s.instructions);
   const bill = useCartBill();
 
-  const addresses = useAddressStore((s) => s.addresses);
-  const selectedId = useAddressStore((s) => s.selectedId);
+  const selectedAddress = useSelectedAddress();
+  const [error, setError] = useState("");
 
   const [method, setMethod] = useState<PaymentMethod>("UPI");
 
@@ -55,7 +55,15 @@ export default function CheckoutScreen() {
     };
   }, [restaurantId]);
 
-  const continueToPayment = () => router.push({ pathname: "/checkout/payment", params: { method } });
+  const continueToPayment = () => {
+    if (!selectedAddress) {
+      setError("Add or select a delivery address before placing the order.");
+      router.push("/checkout/address");
+      return;
+    }
+    setError("");
+    router.push({ pathname: "/checkout/payment", params: { method } });
+  };
 
   // Defensive: cart.tsx already gates entry to this screen, but a guest
   // could still land here via a stale deep link or by signing out on the
@@ -67,11 +75,8 @@ export default function CheckoutScreen() {
       <ScreenHeader title="Checkout" subtitle={restaurantName ?? undefined} />
       <ScrollView contentContainerStyle={styles.scroll}>
         <Section title="Delivery Address" action={{ label: "Change", onPress: () => router.push("/checkout/address") }}>
-          {addresses
-            .filter((a) => a.id === selectedId)
-            .map((a) => (
-              <AddressCard key={a.id} address={a} selected />
-            ))}
+          {selectedAddress ? <AddressCard address={selectedAddress} selected /> : <PrimaryButton label="+ Add Delivery Address" variant="outline" onPress={() => router.push("/checkout/address")} />}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
         </Section>
 
         {restaurant ? (
@@ -151,6 +156,7 @@ const styles = StyleSheet.create({
   section: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.lg, gap: spacing.sm },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   action: { ...typography.captionStrong, color: colors.primary },
+  error: { ...typography.caption, color: colors.error },
   methodRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.xs },
   radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
   radioActive: { borderColor: colors.primary },

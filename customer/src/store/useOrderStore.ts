@@ -58,7 +58,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         foodItemId: i.foodItemId,
         quantity: i.quantity,
         variantId: i.selectedVariant?.id ?? null,
-        addonIds: i.selectedAddons.map((a) => a.id),
+        addonIds: (i.selectedAddons ?? []).map((a) => a.id),
       })),
     });
     set({ orders: [data.order, ...get().orders] });
