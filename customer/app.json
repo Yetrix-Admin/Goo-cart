@@ -1,23 +1,23 @@
 {
   "expo": {
-    "name": "Goocart",
-    "slug": "goocart",
+    "name": "Goocart Customer",
+    "slug": "goocart-customer",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "goocart",
+    "scheme": "goocartcustomer",
     "userInterfaceStyle": "light",
     "backgroundColor": "#FAFAFA",
     "ios": {
       "icon": "./assets/expo.icon",
       "supportsTablet": true,
-      "bundleIdentifier": "com.goocart.app",
+      "bundleIdentifier": "com.goocart.customer",
       "config": {
         "googleMapsApiKey": "REPLACE_WITH_IOS_GOOGLE_MAPS_API_KEY"
       }
     },
     "android": {
-      "package": "com.goocart.app",
+      "package": "com.goocart.customer",
       "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#FF6B35",
@@ -63,7 +63,7 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": false
           }
         }
       ],

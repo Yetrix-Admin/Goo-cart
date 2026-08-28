@@ -3,6 +3,7 @@
 # dependencies
 /node_modules
 /.pnpm-store/
+/.gradle-cache/
 .atlas-tools/
 *.tsbuildinfo
 /.pnp

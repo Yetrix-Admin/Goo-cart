@@ -11,7 +11,11 @@
     "start": "next start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .atlas-tools --ignore-pattern server --ignore-pattern mobile --ignore-pattern customer --ignore-pattern vendor --ignore-pattern partner",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "android:verify": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-android.ps1 -VerifyOnly",
+    "android:apk": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-android.ps1 -Artifact apk",
+    "android:aab": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-android.ps1 -Artifact aab",
+    "android:all": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-android.ps1 -Artifact both"
   },
   "dependencies": {
     "next": "16.3.3",

@@ -1,22 +1,22 @@
 {
   "expo": {
-    "name": "Goocart Partner",
-    "slug": "goocart-partner",
+    "name": "Goocart Delivery Partner",
+    "slug": "goocart-delivery",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "goocartpartner",
+    "scheme": "goocartdelivery",
     "userInterfaceStyle": "light",
     "backgroundColor": "#FAFAFA",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.goocart.partner",
+      "bundleIdentifier": "com.goocart.delivery",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Goocart Partner shares your live location with the customer and admin while you have an active delivery, so they can track your progress."
+        "NSLocationWhenInUseUsageDescription": "Goocart Delivery Partner shares your live location with the customer and admin while you have an active delivery, so they can track your progress."
       }
     },
     "android": {
-      "package": "com.goocart.partner",
+      "package": "com.goocart.delivery",
       "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#FF6B35",
@@ -49,7 +49,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Goocart Partner shares your live location with the customer and admin while you have an active delivery."
+          "locationWhenInUsePermission": "Goocart Delivery Partner shares your live location with the customer and admin while you have an active delivery."
         }
       ],
       "expo-notifications",
@@ -57,7 +57,7 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": false
           }
         }
       ],
