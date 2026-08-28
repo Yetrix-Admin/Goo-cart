@@ -21,7 +21,7 @@ import { startReservationWatchdog } from "./lib/inventory.js";
 dotenv.config();
 // Local secrets can be split from the Atlas connection file. Both files are
 // ignored by Git; production continues to use host-managed environment vars.
-dotenv.config({ path: ".env.resend", override: true });
+dotenv.config({ path: ".env.email", override: true });
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;

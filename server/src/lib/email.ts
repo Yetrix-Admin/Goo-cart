@@ -1,46 +1,53 @@
-// Transactional email via Resend's HTTP API.
+// Transactional email via Gmail SMTP (nodemailer), sent as the account named
+// by GMAIL_USER using an App Password — not the account's real login
+// password. Requires 2-Step Verification enabled on that Google account and
+// an App Password generated at https://myaccount.google.com/apppasswords.
 //
-// Called with fetch rather than the SDK to keep the dependency surface small —
-// it is a single POST. When RESEND_API_KEY is absent the sender degrades to a
+// Gmail cannot prove domain ownership the way a custom domain can, so this
+// trades away Resend-style deliverability/scale for the ability to send from
+// a real Gmail address with zero DNS setup. Regular Gmail accounts are capped
+// around 500 sends/day — fine at launch, a real limit at scale.
+//
+// When GMAIL_USER/GMAIL_APP_PASSWORD are absent the sender degrades to a
 // clearly-labelled console fallback so local development still works, and it
 // never reports success for an email it did not actually send.
 
-const RESEND_ENDPOINT = "https://api.resend.com/emails";
+import nodemailer, { type Transporter } from "nodemailer";
 
 export type EmailResult = { delivered: boolean; reason?: string };
 
-function configured(): { key: string; from: string } | null {
-  const key = process.env.RESEND_API_KEY;
-  const from = process.env.RESEND_FROM_EMAIL || "Goocart <onboarding@resend.dev>";
-  return key ? { key, from } : null;
+// Reused across calls: Gmail rate-limits new SMTP connections, and nodemailer
+// pools/keeps this one alive rather than reconnecting per send.
+let transporter: Transporter | null = null;
+let transporterUser: string | null = null;
+
+function getTransporter(): { transporter: Transporter; from: string } | null {
+  const user = process.env.GMAIL_USER;
+  const pass = process.env.GMAIL_APP_PASSWORD;
+  if (!user || !pass) return null;
+
+  if (!transporter || transporterUser !== user) {
+    transporter = nodemailer.createTransport({ service: "gmail", auth: { user, pass } });
+    transporterUser = user;
+  }
+  return { transporter, from: `Goocart <${user}>` };
 }
 
 export async function sendEmail(to: string, subject: string, html: string, text: string): Promise<EmailResult> {
-  const config = configured();
+  const config = getTransporter();
   if (!config) {
-    console.log(`[EMAIL NOT SENT — no RESEND_API_KEY] to=${to} subject="${subject}"\n${text}`);
+    console.log(`[EMAIL NOT SENT — GMAIL_USER/GMAIL_APP_PASSWORD not configured] to=${to} subject="${subject}"\n${text}`);
     return { delivered: false, reason: "Email provider is not configured" };
   }
 
   try {
-    const response = await fetch(RESEND_ENDPOINT, {
-      method: "POST",
-      headers: { authorization: `Bearer ${config.key}`, "content-type": "application/json" },
-      body: JSON.stringify({ from: config.from, to: [to], subject, html, text }),
-    });
-
-    if (!response.ok) {
-      // Resend's message explains the real cause (unverified domain, bad key,
-      // rate limit); surfacing it beats a generic failure.
-      const detail = await response.text().catch(() => "");
-      console.error(`Resend rejected the email (${response.status}): ${detail}`);
-      return { delivered: false, reason: `Email provider returned ${response.status}` };
-    }
-
+    await config.transporter.sendMail({ from: config.from, to, subject, html, text });
     return { delivered: true };
   } catch (error) {
-    console.error("Could not reach Resend:", error instanceof Error ? error.message : error);
-    return { delivered: false, reason: "Could not reach the email provider" };
+    // Gmail's own message explains the real cause (bad app password, 2FA not
+    // enabled, sending cap hit); surfacing it beats a generic failure.
+    console.error("Gmail SMTP rejected the email:", error instanceof Error ? error.message : error);
+    return { delivered: false, reason: "Email provider rejected the message" };
   }
 }
 
