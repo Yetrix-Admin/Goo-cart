@@ -191,6 +191,12 @@ function AdminVendors(){
 
   return <WorkspacePage eyebrow="VENDOR ACCOUNTS" title="Restaurants & owners" copy="Create vendors, link owners, control order acceptance, and manage each vendor's Vendor App team.">
     {error&&<p className="auth-error">{error}</p>}
+    <FlowSteps steps={[
+      ["1","Create vendor","Add restaurant details and create the owner login credentials."],
+      ["2","Set automation","Choose manual, auto, or smart auto-accept with kitchen capacity."],
+      ["3","Add menu & offers","Create live dishes, prices, availability and restaurant banners."],
+      ["4","Manage team","Add managers or staff and give only the permissions they need."],
+    ]}/>
     <PrimaryActionButton label={showCreate?"Cancel":"+ Create Vendor"} onClick={()=>setShowCreate(!showCreate)}/>
     {showCreate&&<CreateVendorForm onCreated={()=>{setShowCreate(false);void load();}}/>}
     {restaurants===null?<Empty title="Loading…" copy="Fetching restaurants and vendor accounts."/>:!restaurants.length?<Empty title="No restaurants yet" copy="Create one above, or seed the catalog to see restaurants here."/>:
@@ -222,6 +228,8 @@ function AdminVendors(){
 }
 
 function PrimaryActionButton({label,onClick}:{label:string;onClick:()=>void}){return <button className="primary" style={{width:"max-content",marginBottom:14}} onClick={onClick}>{label}</button>;}
+
+function FlowSteps({steps}:{steps:[string,string,string][]}){return <div className="flow-steps">{steps.map((step)=><article key={step[0]}><i>{step[0]}</i><span><b>{step[1]}</b><small>{step[2]}</small></span></article>)}</div>;}
 
 function CreateVendorForm({onCreated}:{onCreated:()=>void}){
   const [form,setForm]=useState({name:"",area:"",latitude:"",longitude:"",businessType:"",ownerName:"",ownerEmail:"",ownerPhone:"",initialPassword:"",manualOrderAcceptance:true});
@@ -487,6 +495,12 @@ function AdminPartners(){
 
   return <WorkspacePage eyebrow="DELIVERY FLEET" title="Delivery partners" copy="Approve new partners, and control who can go online and receive deliveries.">
     {error&&<p className="auth-error">{error}</p>}
+    <FlowSteps steps={[
+      ["1","Create partner login","Enter identity, phone, vehicle and initial password."],
+      ["2","Verify & approve","Keep pending until documents are checked, or approve immediately."],
+      ["3","Keep active","Only active and approved partners can go online."],
+      ["4","Partner goes online","The Partner app receives offers only after online + location update."],
+    ]}/>
     <PrimaryActionButton label={showCreate?"Cancel":"+ Create Delivery Partner"} onClick={()=>setShowCreate(!showCreate)}/>
     {showCreate&&<CreatePartnerForm onCreated={()=>{setShowCreate(false);void load();}}/>}
     {partners===null?<Empty title="Loading…" copy="Fetching delivery partners."/>:!partners.length?<Empty title="No delivery partners yet" copy="Create one above to get started."/>:

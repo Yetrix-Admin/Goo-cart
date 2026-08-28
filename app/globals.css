@@ -28,6 +28,8 @@
 @media(max-width:760px){.page-head h1{font-size:30px}.ops-table{overflow:hidden}.ops-head{display:none}.ops-row{grid-template-columns:1fr auto;gap:8px;padding:14px}.ops-row>span:nth-child(2){grid-column:1}.ops-row>.status{grid-column:2;grid-row:1}.ops-row>strong{display:block!important;grid-column:1;font-size:11px}.ops-row>.row-actions{grid-column:2;grid-row:2/4}.inventory-list article{grid-template-columns:auto 1fr}.inventory-list article>b,.inventory-list article>.qty{grid-column:2}.stat-list{grid-template-columns:1fr}.workspace-page{padding:25px 0}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important;animation-duration:.01ms!important}}
 
+.flow-steps{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:20px 0 14px}.flow-steps article{display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:13px;padding:13px}.flow-steps i{display:grid;place-items:center;flex:0 0 28px;width:28px;height:28px;border-radius:9px;background:var(--o);color:#fff;font-style:normal;font-size:10px;font-weight:900}.flow-steps span{display:flex;flex-direction:column;gap:4px}.flow-steps b{font-size:10px}.flow-steps small{font-size:8px;color:var(--muted);line-height:1.35}
+@media(max-width:900px){.flow-steps{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){.flow-steps{grid-template-columns:1fr}}
 /* Vendor / partner / order management additions */
 .vendor-row{display:flex;flex-direction:column;gap:10px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px}
 .vendor-row-head{display:flex;align-items:center;gap:12px}
