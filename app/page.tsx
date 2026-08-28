@@ -35,50 +35,26 @@ function useGoocart(){
 
 async function logout(){await fetch("/api/auth/logout",{method:"POST"});window.location.reload();}
 
-type AuthMode = "password" | "otp";
 function AuthGate({onAuthenticated}:{onAuthenticated:()=>void}){
-  const [mode,setMode]=useState<AuthMode>("password"); const [isSignup,setIsSignup]=useState(false); const [step,setStep]=useState<"form"|"code">("form");
-  const [name,setName]=useState(""); const [email,setEmail]=useState(""); const [password,setPassword]=useState(""); const [identifier,setIdentifier]=useState(""); const [code,setCode]=useState("");
+  const [isSignup,setIsSignup]=useState(false);
+  const [name,setName]=useState(""); const [email,setEmail]=useState(""); const [password,setPassword]=useState("");
   const [busy,setBusy]=useState(false); const [error,setError]=useState("");
-  const switchMode=(next:AuthMode)=>{setMode(next);setStep("form");setError("");};
 
   const submitPassword=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
     try{const res=await fetch(isSignup?"/api/auth/signup":"/api/auth/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(isSignup?{email,password,name}:{email,password})});const json=await res.json() as ApiResult;if(!json.success)throw new Error(json.error?.message||"Something went wrong");onAuthenticated();}
     catch(e){setError(e instanceof Error?e.message:"Something went wrong");}finally{setBusy(false);}};
 
-  const requestCode=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
-    try{const res=await fetch("/api/auth/otp/request",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({identifier,purpose:isSignup?"SIGNUP":"LOGIN"})});const json=await res.json() as ApiResult;if(!json.success)throw new Error(json.error?.message||"Could not send code");setStep("code");}
-    catch(e){setError(e instanceof Error?e.message:"Could not send code");}finally{setBusy(false);}};
-
-  const verifyCode=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
-    try{const res=await fetch("/api/auth/otp/verify",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({identifier,code,name,purpose:isSignup?"SIGNUP":"LOGIN"})});const json=await res.json() as ApiResult;if(!json.success)throw new Error(json.error?.message||"That code is incorrect or has expired");onAuthenticated();}
-    catch(e){setError(e instanceof Error?e.message:"That code is incorrect or has expired");}finally{setBusy(false);}};
-
   return <main className="auth-gate">
     <Brand/>
     <h1>{isSignup?"Create your account":"Sign in to Goocart Admin"}</h1>
     <p className="auth-subtitle">The operations console for the Goocart platform. Customer, vendor and delivery partner accounts use the Goocart mobile apps instead.</p>
-    <div className="auth-tabs"><button className={mode==="password"?"active":""} onClick={()=>switchMode("password")}>Email &amp; password</button><button className={mode==="otp"?"active":""} onClick={()=>switchMode("otp")}>Email or phone code</button></div>
-    {mode==="password"&&<form className="auth-form" onSubmit={(e)=>void submitPassword(e)}>
+    <form className="auth-form" onSubmit={(e)=>void submitPassword(e)}>
       {isSignup&&<label>Full name<input required minLength={2} value={name} onChange={(e)=>setName(e.target.value)}/></label>}
       <label>Email<input required type="email" value={email} onChange={(e)=>setEmail(e.target.value)}/></label>
       <label>Password<input required minLength={8} type="password" value={password} onChange={(e)=>setPassword(e.target.value)}/></label>
       {error&&<p className="auth-error">{error}</p>}
       <button className="primary" disabled={busy}>{busy?"Please wait...":isSignup?"Create account":"Sign in"}</button>
-    </form>}
-    {mode==="otp"&&step==="form"&&<form className="auth-form" onSubmit={(e)=>void requestCode(e)}>
-      {isSignup&&<label>Full name<input required minLength={2} value={name} onChange={(e)=>setName(e.target.value)}/></label>}
-      <label>Email or phone<input required value={identifier} onChange={(e)=>setIdentifier(e.target.value)}/></label>
-      {error&&<p className="auth-error">{error}</p>}
-      <button className="primary" disabled={busy}>{busy?"Sending...":"Send code"}</button>
-    </form>}
-    {mode==="otp"&&step==="code"&&<form className="auth-form" onSubmit={(e)=>void verifyCode(e)}>
-      <p>Enter the 6-digit code sent to {identifier}.</p>
-      <label>Code<input required pattern="[0-9]{6}" inputMode="numeric" value={code} onChange={(e)=>setCode(e.target.value)}/></label>
-      {error&&<p className="auth-error">{error}</p>}
-      <button className="primary" disabled={busy}>{busy?"Verifying...":"Verify & continue"}</button>
-      <button type="button" className="auth-switch" onClick={()=>setStep("form")}>Use a different email or phone</button>
-    </form>}
+    </form>
     <button className="auth-switch" onClick={()=>{setIsSignup(!isSignup);setError("");}}>{isSignup?"Already have an account? Sign in":"New to Goocart? Create an account"}</button>
   </main>;
 }
