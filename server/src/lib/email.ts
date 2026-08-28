@@ -1,53 +1,98 @@
-// Transactional email via Gmail SMTP (nodemailer), sent as the account named
-// by GMAIL_USER using an App Password — not the account's real login
-// password. Requires 2-Step Verification enabled on that Google account and
-// an App Password generated at https://myaccount.google.com/apppasswords.
+// Transactional email via the Gmail REST API over HTTPS — deliberately NOT
+// SMTP. Cloud hosts (this app runs on Render) commonly block outbound SMTP
+// ports 465/587 as an anti-spam measure; every send silently hung until
+// timeout when this used nodemailer over SMTP, even with correct
+// credentials. The Gmail API is plain HTTPS on 443, which is never blocked.
 //
-// Gmail cannot prove domain ownership the way a custom domain can, so this
-// trades away Resend-style deliverability/scale for the ability to send from
-// a real Gmail address with zero DNS setup. Regular Gmail accounts are capped
-// around 500 sends/day — fine at launch, a real limit at scale.
-//
-// When GMAIL_USER/GMAIL_APP_PASSWORD are absent the sender degrades to a
-// clearly-labelled console fallback so local development still works, and it
-// never reports success for an email it did not actually send.
+// Authenticated as GMAIL_USER via OAuth2 — GMAIL_CLIENT_ID/GMAIL_CLIENT_SECRET
+// identify the app, GMAIL_REFRESH_TOKEN is a one-time consent grant for that
+// mailbox. None of these are the account's real password. When any is absent
+// the sender degrades to a clearly-labelled console fallback so local
+// development still works, and it never reports success for an email it did
+// not actually send.
 
-import nodemailer, { type Transporter } from "nodemailer";
+const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const SEND_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
 
 export type EmailResult = { delivered: boolean; reason?: string };
 
-// Reused across calls: Gmail rate-limits new SMTP connections, and nodemailer
-// pools/keeps this one alive rather than reconnecting per send.
-let transporter: Transporter | null = null;
-let transporterUser: string | null = null;
+type GmailConfig = { user: string; clientId: string; clientSecret: string; refreshToken: string };
 
-function getTransporter(): { transporter: Transporter; from: string } | null {
+function configured(): GmailConfig | null {
   const user = process.env.GMAIL_USER;
-  const pass = process.env.GMAIL_APP_PASSWORD;
-  if (!user || !pass) return null;
+  const clientId = process.env.GMAIL_CLIENT_ID;
+  const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+  const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
+  return user && clientId && clientSecret && refreshToken ? { user, clientId, clientSecret, refreshToken } : null;
+}
 
-  if (!transporter || transporterUser !== user) {
-    transporter = nodemailer.createTransport({ service: "gmail", auth: { user, pass } });
-    transporterUser = user;
+// Google's access tokens are short-lived (~1hr); cached and reused across
+// calls instead of exchanging the refresh token on every send.
+let cachedToken: { accessToken: string; expiresAt: number } | null = null;
+
+async function getAccessToken(config: GmailConfig): Promise<string> {
+  if (cachedToken && cachedToken.expiresAt > Date.now() + 30_000) return cachedToken.accessToken;
+
+  const response = await fetch(TOKEN_ENDPOINT, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      refresh_token: config.refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`Google token refresh returned ${response.status}: ${detail}`);
   }
-  return { transporter, from: `Goocart <${user}>` };
+  const data = (await response.json()) as { access_token: string; expires_in: number };
+  cachedToken = { accessToken: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+  return data.access_token;
+}
+
+function base64Url(input: Buffer): string {
+  return input.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** A minimal RFC 2822 message with a UTF-8 HTML body, the shape the Gmail API's `raw` field expects. */
+function buildRawMessage(from: string, to: string, subject: string, html: string): string {
+  const encodedSubject = `=?UTF-8?B?${Buffer.from(subject, "utf-8").toString("base64")}?=`;
+  const headers = [`From: ${from}`, `To: ${to}`, `Subject: ${encodedSubject}`, "MIME-Version: 1.0", 'Content-Type: text/html; charset="UTF-8"', "Content-Transfer-Encoding: base64"].join(
+    "\r\n",
+  );
+  const body = Buffer.from(html, "utf-8").toString("base64");
+  return `${headers}\r\n\r\n${body}`;
 }
 
 export async function sendEmail(to: string, subject: string, html: string, text: string): Promise<EmailResult> {
-  const config = getTransporter();
+  const config = configured();
   if (!config) {
-    console.log(`[EMAIL NOT SENT — GMAIL_USER/GMAIL_APP_PASSWORD not configured] to=${to} subject="${subject}"\n${text}`);
+    console.log(`[EMAIL NOT SENT — Gmail OAuth env vars not configured] to=${to} subject="${subject}"\n${text}`);
     return { delivered: false, reason: "Email provider is not configured" };
   }
 
   try {
-    await config.transporter.sendMail({ from: config.from, to, subject, html, text });
+    const accessToken = await getAccessToken(config);
+    const raw = base64Url(Buffer.from(buildRawMessage(`Goocart <${config.user}>`, to, subject, html), "utf-8"));
+
+    const response = await fetch(SEND_ENDPOINT, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ raw }),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      console.error(`Gmail API rejected the email (${response.status}): ${detail}`);
+      return { delivered: false, reason: `Email provider returned ${response.status}` };
+    }
+
     return { delivered: true };
   } catch (error) {
-    // Gmail's own message explains the real cause (bad app password, 2FA not
-    // enabled, sending cap hit); surfacing it beats a generic failure.
-    console.error("Gmail SMTP rejected the email:", error instanceof Error ? error.message : error);
-    return { delivered: false, reason: "Email provider rejected the message" };
+    console.error("Could not send via the Gmail API:", error instanceof Error ? error.message : error);
+    return { delivered: false, reason: "Could not reach the email provider" };
   }
 }
 
