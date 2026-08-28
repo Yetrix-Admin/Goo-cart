@@ -3,6 +3,7 @@ import { haversineKm, isValidCoordinate } from "./geo.js";
 import { isPartnerEligible } from "./auth.js";
 import { emitOrderUpdate, emitToPartner, emitToAdmin } from "./realtime.js";
 import { notifyUser } from "./push.js";
+import { getAutomationSettings, type AutomationSettings } from "./automationSettings.js";
 
 // Configurable via env so ops can tune without a redeploy of business logic.
 export const OFFER_TIMEOUT_SECONDS = Number(process.env.DELIVERY_OFFER_TIMEOUT_SECONDS) || 30;
@@ -38,8 +39,17 @@ export function clearOrderTimers(orderId: unknown): void {
   }
 }
 
-async function eligiblePartnersNear(latitude: number, longitude: number, radiusKm: number, excludeIds: string[] = []) {
+type ScoredPartner = {
+  partner: any;
+  distanceKm: number;
+  etaToStoreMinutes: number;
+  score: number;
+  scoreBreakdown: Record<string, number>;
+};
+
+async function eligiblePartnersNear(latitude: number, longitude: number, radiusKm: number, excludeIds: string[] = [], settings?: AutomationSettings): Promise<ScoredPartner[]> {
   if (!isValidCoordinate(latitude, longitude)) return [];
+  const automation = settings ?? (await getAutomationSettings());
   const candidates = await User.find({
     role: "DELIVERY_PARTNER",
     status: "ACTIVE",
@@ -52,9 +62,54 @@ async function eligiblePartnersNear(latitude: number, longitude: number, radiusK
   }).lean();
 
   return candidates
-    .map((p: any) => ({ partner: p, distanceKm: haversineKm({ latitude, longitude }, { latitude: p.currentLatitude, longitude: p.currentLongitude }) }))
+    .map((partner: any) => scorePartner(partner, latitude, longitude, radiusKm, automation))
     .filter((p) => p.distanceKm <= radiusKm)
-    .sort((a, b) => a.distanceKm - b.distanceKm);
+    .sort((a, b) => b.score - a.score);
+}
+
+function scorePartner(partner: any, latitude: number, longitude: number, radiusKm: number, settings: AutomationSettings): ScoredPartner {
+  const distanceKm = haversineKm({ latitude, longitude }, { latitude: partner.currentLatitude, longitude: partner.currentLongitude });
+  const etaToStoreMinutes = Math.round((distanceKm / settings.dispatch.averageCitySpeedKmph) * 60);
+  const now = Date.now();
+  const idleMinutes = partner.partnerLastAssignedAt ? Math.max(0, (now - new Date(partner.partnerLastAssignedAt).getTime()) / 60_000) : 60;
+  const acceptanceRate = clamp01(Number(partner.partnerAcceptanceRate ?? 1));
+  const rejectionRate = clamp01(Number(partner.partnerRecentRejectionRate ?? 0));
+  const rating = Math.max(0, Math.min(5, Number(partner.partnerRating ?? 5))) / 5;
+
+  const distanceScore = Math.max(0, 1 - distanceKm / Math.max(radiusKm, 1));
+  const arrivalScore = Math.max(0, 1 - Math.abs(etaToStoreMinutes - settings.dispatch.targetArrivalBufferMinutes) / 30);
+  const availabilityScore = partner.partnerOnline && !partner.partnerBusy ? 1 : 0;
+  const reliabilityScore = Math.max(0, acceptanceRate * 0.55 + (1 - rejectionRate) * 0.25 + rating * 0.2);
+  const fairnessScore = Math.min(1, idleMinutes / 45);
+  const workloadScore = partner.partnerBusy ? 0 : 1;
+  const weights = settings.dispatch.weights;
+  const score =
+    distanceScore * weights.distance +
+    arrivalScore * weights.arrival +
+    availabilityScore * weights.availability +
+    reliabilityScore * weights.reliability +
+    fairnessScore * weights.fairness +
+    workloadScore * weights.workload;
+
+  return {
+    partner,
+    distanceKm,
+    etaToStoreMinutes,
+    score: Math.round(score * 100) / 100,
+    scoreBreakdown: {
+      distance: Math.round(distanceScore * 100),
+      arrival: Math.round(arrivalScore * 100),
+      availability: Math.round(availabilityScore * 100),
+      reliability: Math.round(reliabilityScore * 100),
+      fairness: Math.round(fairnessScore * 100),
+      workload: Math.round(workloadScore * 100),
+    },
+  };
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }
 
 /**
@@ -66,10 +121,12 @@ export async function broadcastDeliveryOffer(orderId: unknown, attempt = 1, radi
   const order: any = await Order.findById(orderId);
   if (!order || order.partnerId || !["NONE", "EXPIRED"].includes(order.deliveryOfferStatus)) return;
 
-  const nearby = await eligiblePartnersNear(order.restaurantLatitude, order.restaurantLongitude, radiusKm);
+  const settings = await getAutomationSettings();
+  if (attempt === 1) radiusKm = settings.dispatch.initialRadiusKm;
+  const nearby = await eligiblePartnersNear(order.restaurantLatitude, order.restaurantLongitude, radiusKm, [], settings);
 
   if (!nearby.length) {
-    if (attempt >= MAX_OFFER_ATTEMPTS) {
+    if (attempt >= settings.dispatch.maxOfferAttempts) {
       order.deliveryOfferStatus = "EXPIRED";
       order.events.push({ event: "DELIVERY_OFFER_EXHAUSTED", actorType: "system", metadata: { attempt, radiusKm } });
       await order.save();
@@ -82,7 +139,7 @@ export async function broadcastDeliveryOffer(orderId: unknown, attempt = 1, radi
     order.deliveryOfferRadiusKm = radiusKm;
     order.events.push({ event: "DELIVERY_OFFER_NO_PARTNERS", actorType: "system", metadata: { attempt, radiusKm } });
     await order.save();
-    scheduleOrderTimer(orderId, 15_000, () => void broadcastDeliveryOffer(orderId, attempt + 1, Math.min(radiusKm + RADIUS_STEP_KM, MAX_RADIUS_KM)));
+    scheduleOrderTimer(orderId, 15_000, () => void broadcastDeliveryOffer(orderId, attempt + 1, Math.min(radiusKm + settings.dispatch.radiusStepKm, settings.dispatch.maxRadiusKm)));
     return;
   }
 
@@ -90,10 +147,10 @@ export async function broadcastDeliveryOffer(orderId: unknown, attempt = 1, radi
   order.deliveryOfferStatus = "OFFERING";
   order.deliveryOfferedPartnerIds = offeredIds;
   order.deliveryOfferStartedAt = new Date();
-  order.deliveryOfferExpiresAt = new Date(Date.now() + OFFER_TIMEOUT_SECONDS * 1000);
+  order.deliveryOfferExpiresAt = new Date(Date.now() + settings.dispatch.offerTimeoutSeconds * 1000);
   order.deliveryOfferRadiusKm = radiusKm;
   order.deliveryOfferAttempts = attempt;
-  order.events.push({ event: "DELIVERY_OFFER_STARTED", actorType: "system", metadata: { offeredTo: offeredIds, radiusKm, attempt } });
+  order.events.push({ event: "DELIVERY_OFFER_STARTED", eventType: "PARTNER_SEARCH_STARTED", actorType: "system", metadata: { offeredTo: offeredIds, radiusKm, attempt, scoring: nearby.map((n) => ({ partnerId: String(n.partner._id), score: n.score, pickupDistanceKm: Math.round(n.distanceKm * 10) / 10, etaToStoreMinutes: n.etaToStoreMinutes, breakdown: n.scoreBreakdown })) } });
   await order.save();
 
   const payload = {
@@ -105,8 +162,8 @@ export async function broadcastDeliveryOffer(orderId: unknown, attempt = 1, radi
     expiresAt: order.deliveryOfferExpiresAt,
   };
 
-  for (const { partner, distanceKm } of nearby) {
-    emitToPartner(partner._id, "delivery:offer", { ...payload, pickupDistanceKm: Math.round(distanceKm * 10) / 10 });
+  for (const { partner, distanceKm, etaToStoreMinutes, score, scoreBreakdown } of nearby) {
+    emitToPartner(partner._id, "delivery:offer", { ...payload, pickupDistanceKm: Math.round(distanceKm * 10) / 10, etaToStoreMinutes, dispatchScore: score, scoreBreakdown });
     void notifyUser(
       partner._id,
       "New Delivery Available",
@@ -119,7 +176,7 @@ export async function broadcastDeliveryOffer(orderId: unknown, attempt = 1, radi
   emitToAdmin("delivery:offer_started", { orderId: String(order._id), orderNumber: order.orderNumber, offeredTo: offeredIds.length });
 
   // Auto-expire if nobody accepts in time.
-  scheduleOrderTimer(order._id, OFFER_TIMEOUT_SECONDS * 1000 + 500, () => void expireOfferIfStale(order._id));
+  scheduleOrderTimer(order._id, settings.dispatch.offerTimeoutSeconds * 1000 + 500, () => void expireOfferIfStale(order._id));
 }
 
 function dropDistanceKm(order: any): number {
@@ -142,9 +199,10 @@ async function expireOfferIfStale(orderId: unknown): Promise<void> {
   for (const partnerId of order.deliveryOfferedPartnerIds) emitToPartner(partnerId, "delivery:offer_closed", { orderId: String(order._id), reason: "EXPIRED" });
 
   // Retry with a wider net, up to the attempt cap.
+  const settings = await getAutomationSettings();
   const nextAttempt = (order.deliveryOfferAttempts ?? 1) + 1;
-  const nextRadius = Math.min((order.deliveryOfferRadiusKm ?? INITIAL_RADIUS_KM) + RADIUS_STEP_KM, MAX_RADIUS_KM);
-  if (nextAttempt <= MAX_OFFER_ATTEMPTS) {
+  const nextRadius = Math.min((order.deliveryOfferRadiusKm ?? settings.dispatch.initialRadiusKm) + settings.dispatch.radiusStepKm, settings.dispatch.maxRadiusKm);
+  if (nextAttempt <= settings.dispatch.maxOfferAttempts) {
     void broadcastDeliveryOffer(orderId, nextAttempt, nextRadius);
   } else {
     emitToAdmin("delivery:offer_exhausted", { orderId: String(order._id), orderNumber: order.orderNumber });
@@ -196,10 +254,10 @@ export async function claimDelivery(orderId: string, partner: { _id: unknown; na
       status: "READY_FOR_PICKUP",
     },
     {
-      $set: { partnerId: partner._id, partnerName: partner.name, status: "DELIVERY_PARTNER_ASSIGNED", deliveryOfferStatus: "ASSIGNED" },
+      $set: { partnerId: partner._id, partnerName: partner.name, status: "DELIVERY_PARTNER_ASSIGNED", deliveryOfferStatus: "ASSIGNED", partnerEtaToStoreMinutes: null },
       $push: {
         statusHistory: { status: "DELIVERY_PARTNER_ASSIGNED", actorId: partner._id, actorRole: "DELIVERY_PARTNER", at: now },
-        events: { event: "DELIVERY_PARTNER_ASSIGNED", actorType: "partner", actorId: partner._id, at: now },
+        events: { event: "DELIVERY_PARTNER_ASSIGNED", eventType: "PARTNER_ASSIGNED", oldStatus: "READY_FOR_PICKUP", newStatus: "DELIVERY_PARTNER_ASSIGNED", actorType: "partner", actorId: partner._id, at: now },
       },
     },
     { new: true },
@@ -207,7 +265,7 @@ export async function claimDelivery(orderId: string, partner: { _id: unknown; na
 
   if (claimed) {
     clearOrderTimers(claimed._id);
-    await User.updateOne({ _id: partner._id }, { $set: { partnerBusy: true } });
+    await User.updateOne({ _id: partner._id }, { $set: { partnerBusy: true, partnerLastAssignedAt: now } });
 
     for (const otherId of claimed.deliveryOfferedPartnerIds) {
       if (String(otherId) === String(partner._id)) continue;

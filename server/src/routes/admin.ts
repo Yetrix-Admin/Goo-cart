@@ -10,6 +10,7 @@ import { emitToAdmin } from "../lib/realtime.js";
 import { notifyUser } from "../lib/push.js";
 import { unassignPartner } from "../lib/delivery.js";
 import { getPricingSettings, updatePricingSettings } from "../lib/pricingSettings.js";
+import { getAutomationSettings, updateAutomationSettings } from "../lib/automationSettings.js";
 import { createFoodItem, updateFoodItem, MenuItemError } from "../lib/menuItems.js";
 import { EMAIL_RE, PHONE_RE } from "../lib/http.js";
 import { sendWelcomeEmail } from "../lib/email.js";
@@ -217,7 +218,7 @@ adminRouter.post("/restaurants", async (req: AuthedRequest, res) => {
   }
 });
 
-const EDITABLE_RESTAURANT_FIELDS = ["name", "area", "latitude", "longitude", "businessType", "gst", "pan", "bankDetails", "openingTime", "closingTime", "serviceRadiusKm"];
+const EDITABLE_RESTAURANT_FIELDS = ["name", "area", "latitude", "longitude", "businessType", "gst", "pan", "bankDetails", "openingTime", "closingTime", "serviceRadiusKm", "autoAcceptanceMode", "temporaryBusyMode", "maxSimultaneousOrders", "averagePreparationMinutes", "maximumQueue"];
 
 adminRouter.patch("/restaurants/:id", async (req: AuthedRequest, res) => {
   try {
@@ -254,13 +255,43 @@ adminRouter.patch("/restaurants/:id/status", async (req: AuthedRequest, res) => 
 adminRouter.patch("/restaurants/:id/manual-acceptance", async (req: AuthedRequest, res) => {
   try {
     const manualOrderAcceptance = Boolean(req.body?.manualOrderAcceptance);
-    const restaurant = await Restaurant.findByIdAndUpdate(req.params.id, { $set: { manualOrderAcceptance } }, { new: true });
+    const restaurant = await Restaurant.findByIdAndUpdate(req.params.id, { $set: { manualOrderAcceptance, autoAcceptanceMode: manualOrderAcceptance ? "MANUAL" : "AUTOMATIC" } }, { new: true });
     if (!restaurant) return res.status(404).json(fail("RESTAURANT_NOT_FOUND", "Restaurant not found"));
 
     await audit(req, "vendor.manual_acceptance", "restaurant", req.params.id, {}, { manualOrderAcceptance });
     res.json(ok({ restaurant: toRestaurantDTO(restaurant.toObject()) }, manualOrderAcceptance ? "Manual acceptance enabled" : "Manual acceptance disabled — orders will auto-accept"));
   } catch (e) {
     res.status(500).json(fail("VENDOR_SETTING_FAILED", e instanceof Error ? e.message : "Could not update this vendor's setting"));
+  }
+});
+
+adminRouter.patch("/restaurants/:id/automation", async (req: AuthedRequest, res) => {
+  try {
+    const body = req.body ?? {};
+    const patch: Record<string, unknown> = {};
+    if (body.autoAcceptanceMode !== undefined) {
+      const mode = String(body.autoAcceptanceMode);
+      if (!["MANUAL", "AUTOMATIC", "SMART_AUTOMATIC"].includes(mode)) return res.status(400).json(fail("INVALID_MODE", "Mode must be MANUAL, AUTOMATIC or SMART_AUTOMATIC."));
+      patch.autoAcceptanceMode = mode;
+      patch.manualOrderAcceptance = mode === "MANUAL";
+    }
+    for (const field of ["maxSimultaneousOrders", "averagePreparationMinutes", "maximumQueue"]) {
+      if (body[field] === undefined) continue;
+      const value = Number(body[field]);
+      if (!Number.isFinite(value) || value < 1) return res.status(400).json(fail("INVALID_VALUE", `${field} must be greater than 0.`));
+      patch[field] = Math.round(value);
+    }
+    if (body.temporaryBusyMode !== undefined) patch.temporaryBusyMode = Boolean(body.temporaryBusyMode);
+    if (!Object.keys(patch).length) return res.status(400).json(fail("NO_CHANGES", "Send at least one automation setting."));
+
+    const before = await Restaurant.findById(req.params.id).lean();
+    const restaurant = await Restaurant.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true });
+    if (!restaurant) return res.status(404).json(fail("RESTAURANT_NOT_FOUND", "Restaurant not found"));
+
+    await audit(req, "vendor.automation", "restaurant", req.params.id, before, patch);
+    res.json(ok({ restaurant: toRestaurantDTO(restaurant.toObject()) }, "Vendor automation updated"));
+  } catch (e) {
+    res.status(500).json(fail("VENDOR_AUTOMATION_FAILED", e instanceof Error ? e.message : "Could not update automation settings"));
   }
 });
 
@@ -844,6 +875,33 @@ adminRouter.patch("/pricing-settings", async (req: AuthedRequest, res) => {
     res.json(ok({ pricing }, "Pricing updated"));
   } catch (e) {
     res.status(500).json(fail("PRICING_UPDATE_FAILED", e instanceof Error ? e.message : "Could not update pricing settings"));
+  }
+});
+
+// --- Automation control center foundation ---------------------------------
+
+adminRouter.get("/automation/settings", async (_req, res) => {
+  try {
+    const automation = await getAutomationSettings();
+    res.json(ok({ automation, settings: automation }));
+  } catch (e) {
+    res.status(500).json(fail("AUTOMATION_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load automation settings"));
+  }
+});
+
+adminRouter.patch("/automation/settings", async (req: AuthedRequest, res) => {
+  try {
+    const body = req.body ?? {};
+    const before = await getAutomationSettings();
+    const automation = await updateAutomationSettings({
+      featureFlags: body.featureFlags,
+      dispatch: body.dispatch,
+      vendor: body.vendor,
+    });
+    await audit(req, "automation.update", "setting", "automation", before, automation);
+    res.json(ok({ automation, settings: automation }, "Automation settings updated"));
+  } catch (e) {
+    res.status(500).json(fail("AUTOMATION_UPDATE_FAILED", e instanceof Error ? e.message : "Could not update automation settings"));
   }
 });
 

@@ -45,7 +45,7 @@ partnerRouter.post("/online", async (req: AuthedRequest, res) => {
 
     // Going offline mid-delivery does not abandon the customer — the active
     // job stays assigned; only the eligibility to receive NEW offers changes.
-    await User.updateOne({ _id: user._id }, { $set: { partnerOnline: value } });
+    await User.updateOne({ _id: user._id }, { $set: { partnerOnline: value, ...(value ? { partnerLastOnlineAt: new Date() } : {}) } });
     res.json(ok({ online: value }, value ? "You are online" : "You are offline"));
   } catch (e) {
     res.status(500).json(fail("STATUS_UPDATE_FAILED", e instanceof Error ? e.message : "Could not update status"));

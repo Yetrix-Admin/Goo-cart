@@ -8,6 +8,7 @@ import { ok, fail } from "../lib/http.js";
 import { claimDelivery, broadcastDeliveryOffer, unassignPartner, clearOrderTimers } from "../lib/delivery.js";
 import { emitOrderUpdate } from "../lib/realtime.js";
 import { notifyUser, notifyUsers } from "../lib/push.js";
+import { getAutomationSettings } from "../lib/automationSettings.js";
 
 export const ordersRouter = Router();
 
@@ -21,6 +22,28 @@ class OrderError extends Error {
   constructor(public code: string, message: string, public status = 400) {
     super(message);
   }
+}
+
+async function resolveVendorAutomation(restaurant: any): Promise<{ mode: "MANUAL" | "AUTOMATIC" | "SMART_AUTOMATIC"; preparationMinutes: number; reason: string }> {
+  const settings = await getAutomationSettings();
+  const mode = (restaurant.autoAcceptanceMode ?? (restaurant.manualOrderAcceptance === false ? "AUTOMATIC" : "MANUAL")) as "MANUAL" | "AUTOMATIC" | "SMART_AUTOMATIC";
+  const preparationMinutes = Number(restaurant.averagePreparationMinutes ?? settings.vendor.defaultAveragePreparationMinutes) || settings.vendor.defaultAveragePreparationMinutes;
+
+  if (mode === "AUTOMATIC") return { mode, preparationMinutes, reason: "Restaurant configured for automatic acceptance." };
+  if (mode !== "SMART_AUTOMATIC" || !settings.vendor.smartAutoAcceptEnabled) return { mode: "MANUAL", preparationMinutes, reason: "Restaurant configured for manual acceptance." };
+
+  if (!restaurant.isOpen || restaurant.status !== "ACTIVE") return { mode: "MANUAL", preparationMinutes, reason: "Restaurant is not active/open." };
+  if (restaurant.temporaryBusyMode) return { mode: "MANUAL", preparationMinutes, reason: "Restaurant busy mode is on." };
+
+  const activeCount = await Order.countDocuments({
+    restaurantId: restaurant._id,
+    status: { $nin: ["DELIVERED", "VENDOR_REJECTED", "CANCELLED_BY_CUSTOMER", "CANCELLED_BY_ADMIN"] },
+  });
+  const maxActive = Number(restaurant.maxSimultaneousOrders ?? settings.vendor.defaultMaxSimultaneousOrders);
+  const maxQueue = Number(restaurant.maximumQueue ?? settings.vendor.defaultMaximumQueue);
+  if (activeCount >= Math.min(maxActive, maxQueue)) return { mode: "MANUAL", preparationMinutes, reason: "Kitchen queue is full." };
+
+  return { mode, preparationMinutes: preparationMinutes + Math.floor(activeCount / 3) * 5, reason: "Kitchen is open and below configured capacity." };
 }
 
 /**
@@ -149,14 +172,17 @@ ordersRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
     // order needs a human to press Accept, or the backend accepts it for
     // them immediately. Either way the order exists in Mongo before either
     // path runs — nothing here is simulated client-side.
-    const manualAcceptanceRequired = restaurant.manualOrderAcceptance !== false;
+    const vendorAutomation = await resolveVendorAutomation(restaurant);
+    const manualAcceptanceRequired = vendorAutomation.mode === "MANUAL";
     const initialStatus: OrderStatus = manualAcceptanceRequired ? "PLACED" : "VENDOR_ACCEPTED";
+    const predictedReadyAt = initialStatus === "VENDOR_ACCEPTED" ? new Date(now.getTime() + vendorAutomation.preparationMinutes * 60_000) : null;
+    const dispatchAt = predictedReadyAt ? new Date(predictedReadyAt.getTime() - Math.max(1, Math.min(10, Math.round(vendorAutomation.preparationMinutes / 3))) * 60_000) : null;
 
     const events = [{ event: "ORDER_PLACED", actorType: "customer", actorId: req.user!._id, at: now }];
     if (manualAcceptanceRequired) {
       events.push({ event: "VENDOR_NOTIFIED", actorType: "system", actorId: null, at: now } as any);
     } else {
-      events.push({ event: "ORDER_AUTO_ACCEPTED", actorType: "system", actorId: null, at: now } as any);
+      events.push({ event: "ORDER_AUTO_ACCEPTED", eventType: "ORDER_ACCEPTED", oldStatus: "PLACED", newStatus: "VENDOR_ACCEPTED", actorType: "system", actorId: null, at: now, metadata: { mode: vendorAutomation.mode, reason: vendorAutomation.reason } } as any);
     }
 
     let order;
@@ -181,6 +207,8 @@ ordersRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
           deliveryOtp: generateOtp(),
           pickupOtp: generateOtp(),
           estimatedDeliveryMinutes: restaurant.deliveryTimeMax,
+          predictedReadyAt,
+          dispatchAt,
           items: lines,
           // Only set when provided — see the schema comment on why an
           // absent key (not a null one) is what makes the sparse unique
@@ -193,7 +221,10 @@ ordersRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
             { status: "PLACED", actorId: req.user!._id, actorRole: req.user!.role, at: now },
             ...(manualAcceptanceRequired ? [] : [{ status: "VENDOR_ACCEPTED", actorId: null, actorRole: "system", at: now }]),
           ],
-          events,
+          events: [
+            { event: "ORDER_PLACED", eventType: "ORDER_CREATED", oldStatus: null, newStatus: "PLACED", actorType: "customer", actorId: req.user!._id, at: now },
+            ...events.filter((event: any) => event.event !== "ORDER_PLACED"),
+          ],
         },
       ]);
     } catch (e: any) {
@@ -218,7 +249,7 @@ ordersRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
     });
 
     const dto = toOrderDTO(order.toObject(), req.user!);
-    emitOrderUpdate(order, manualAcceptanceRequired ? "order:new" : "order:update", { order: dto });
+    emitOrderUpdate(order, manualAcceptanceRequired ? "order:new" : "order:update", { order: dto, eventType: manualAcceptanceRequired ? "ORDER_CREATED" : "ORDER_ACCEPTED" });
 
     void notifyUser(req.user!._id, "Order placed", `Your order ${orderNumber} has been placed.`, { type: "ORDER_PLACED", orderId: String(order._id) }, "ORDER");
 
@@ -340,9 +371,13 @@ ordersRouter.post("/:id/transition", requireAuth, async (req: AuthedRequest, res
 
     const now = new Date();
     const update: Record<string, unknown> = { status: to };
+    if (to === "PREPARING" || to === "VENDOR_ACCEPTED") {
+      const prep = Number(order.averagePreparationMinutes ?? order.estimatedDeliveryMinutes ?? 25) || 25;
+      update.predictedReadyAt = new Date(now.getTime() + prep * 60_000);
+    }
     const push: Record<string, unknown> = {
       statusHistory: { status: to, actorId: user._id, actorRole: user.role, at: now },
-      events: { event: to, actorType: group, actorId: user._id, at: now },
+      events: { event: to, eventType: eventTypeForStatus(to), oldStatus: from, newStatus: to, actorType: group, actorId: user._id, at: now },
     };
 
     const updated = await Order.findOneAndUpdate({ _id: order._id, status: from }, { $set: update, $push: push }, { new: true });
@@ -352,7 +387,13 @@ ordersRouter.post("/:id/transition", requireAuth, async (req: AuthedRequest, res
     // A partner finishing (or a terminal state clearing their assignment)
     // frees them up for the next job.
     if (updated.partnerId && (to === "DELIVERED" || TERMINAL_STATUSES.includes(to))) {
-      await User.updateOne({ _id: updated.partnerId }, { $set: { partnerBusy: false } });
+      await User.updateOne(
+        { _id: updated.partnerId },
+        {
+          $set: { partnerBusy: false },
+          ...(to === "DELIVERED" ? { $inc: { partnerCompletedDeliveries: 1 } } : {}),
+        },
+      );
     }
     if (TERMINAL_STATUSES.includes(to)) {
       clearOrderTimers(updated._id);
@@ -372,7 +413,7 @@ ordersRouter.post("/:id/transition", requireAuth, async (req: AuthedRequest, res
       after: { status: to },
     });
 
-    emitOrderUpdate(updated, "order:update", { orderId: String(updated._id), status: to });
+    emitOrderUpdate(updated, "order:update", { orderId: String(updated._id), status: to, eventType: eventTypeForStatus(to) });
     void sendTransitionPush(updated, to, group);
 
     // A vendor marking the order ready is the trigger that opens the
@@ -477,6 +518,26 @@ async function sendTransitionPush(order: any, to: OrderStatus, group: string): P
       "VENDOR",
     );
   }
+}
+
+function eventTypeForStatus(status: OrderStatus): string {
+  const map: Partial<Record<OrderStatus, string>> = {
+    PLACED: "ORDER_CREATED",
+    VENDOR_ACCEPTED: "ORDER_ACCEPTED",
+    VENDOR_REJECTED: "ORDER_REJECTED",
+    PREPARING: "ORDER_PREPARING",
+    READY_FOR_PICKUP: "ORDER_READY",
+    DELIVERY_PARTNER_ASSIGNED: "PARTNER_ASSIGNED",
+    GOING_TO_VENDOR: "PARTNER_ARRIVING_AT_STORE",
+    ARRIVED_AT_VENDOR: "PARTNER_AT_STORE",
+    PICKED_UP: "ORDER_PICKED_UP",
+    ON_THE_WAY: "ORDER_OUT_FOR_DELIVERY",
+    ARRIVED: "ORDER_ARRIVING",
+    DELIVERED: "ORDER_DELIVERED",
+    CANCELLED_BY_ADMIN: "ORDER_CANCELLED",
+    CANCELLED_BY_CUSTOMER: "ORDER_CANCELLED",
+  };
+  return map[status] ?? status;
 }
 
 async function mayView(user: any, order: any): Promise<boolean> {

@@ -75,6 +75,12 @@ const userSchema = new Schema(
     partnerOnline: { type: Boolean, default: false },
     // A partner with an active delivery cannot be offered another one.
     partnerBusy: { type: Boolean, default: false },
+    partnerAcceptanceRate: { type: Number, default: 1 },
+    partnerRecentRejectionRate: { type: Number, default: 0 },
+    partnerRating: { type: Number, default: 5 },
+    partnerCompletedDeliveries: { type: Number, default: 0 },
+    partnerLastAssignedAt: { type: Date, default: null },
+    partnerLastOnlineAt: { type: Date, default: null },
     currentLatitude: { type: Number, default: null },
     currentLongitude: { type: Number, default: null },
     locationUpdatedAt: { type: Date, default: null },
@@ -159,6 +165,11 @@ const restaurantSchema = new Schema(
     // vendor user must press Accept before the order (and delivery
     // broadcast) proceeds; false = the backend accepts automatically.
     manualOrderAcceptance: { type: Boolean, default: true },
+    autoAcceptanceMode: { type: String, enum: ["MANUAL", "AUTOMATIC", "SMART_AUTOMATIC"], default: "MANUAL" },
+    temporaryBusyMode: { type: Boolean, default: false },
+    maxSimultaneousOrders: { type: Number, default: 12 },
+    averagePreparationMinutes: { type: Number, default: 25 },
+    maximumQueue: { type: Number, default: 20 },
   },
   opts,
 );
@@ -250,6 +261,9 @@ const statusEventSchema = new Schema(
 const orderEventSchema = new Schema(
   {
     event: { type: String, required: true },
+    eventType: { type: String, default: null },
+    oldStatus: { type: String, default: null },
+    newStatus: { type: String, default: null },
     actorType: { type: String, required: true }, // customer | vendor | partner | admin | system
     actorId: { type: Schema.Types.ObjectId, default: null },
     at: { type: Date, default: Date.now },
@@ -295,6 +309,9 @@ const orderSchema = new Schema(
     // happened. Never sent to the customer or an unassigned partner.
     pickupOtp: { type: String, required: true },
     estimatedDeliveryMinutes: { type: Number, default: 30 },
+    predictedReadyAt: { type: Date, default: null },
+    dispatchAt: { type: Date, default: null },
+    partnerEtaToStoreMinutes: { type: Number, default: null },
     partnerId: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
     partnerName: { type: String, default: null },
     items: { type: [orderItemSchema], default: [] },

@@ -27,6 +27,11 @@ function toRestaurantDTO(r: any) {
     longitude: r.longitude,
     offers: (r.offers ?? []).map((o: any) => ({ id: String(o._id), title: o.title, description: o.description ?? null })),
     manualOrderAcceptance: r.manualOrderAcceptance !== false,
+    autoAcceptanceMode: r.autoAcceptanceMode ?? (r.manualOrderAcceptance === false ? "AUTOMATIC" : "MANUAL"),
+    temporaryBusyMode: Boolean(r.temporaryBusyMode),
+    maxSimultaneousOrders: r.maxSimultaneousOrders ?? 12,
+    averagePreparationMinutes: r.averagePreparationMinutes ?? 25,
+    maximumQueue: r.maximumQueue ?? 20,
     status: r.status ?? "ACTIVE",
   };
 }

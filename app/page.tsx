@@ -12,7 +12,7 @@ type Snapshot = { actor:PlatformUser; products:Product[]; orders:Order[]; offers
 type ApiResult = { success:boolean; data?:Snapshot; error?:{code?:string;message:string}; message?:string|null };
 type ErrorState = { code:string; message:string };
 
-const adminNav:string[] = ["Dashboard","Live Orders","Live Operations","Orders","Rides","Parcels","Vendors","Delivery Partners","Customers","Catalog","Discounts & Pricing","Finance","Support","Reports","Settings"];
+const adminNav:string[] = ["Dashboard","Live Orders","Live Operations","Orders","Rides","Parcels","Vendors","Delivery Partners","Customers","Catalog","Discounts & Pricing","Automation","Finance","Support","Reports","Settings"];
 const commerce:Service[] = ["Food","Grocery","Vegetables","Mart"];
 const money = (value:number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
 const label = (value:string) => value.replaceAll("_"," ").toLowerCase().replace(/\b\w/g,(x)=>x.toUpperCase());
@@ -64,7 +64,7 @@ function Kpis({items}:{items:[string,string,string][]}){return <section classNam
 function OrdersTable({orders,act,busy}:{orders:Order[];act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){return <div className="ops-table"><div className="ops-row ops-head"><span>REFERENCE</span><span>DETAILS</span><span>STATUS</span><span>VALUE</span><span>ACTION</span></div>{orders.map((o)=><div className="ops-row" key={o.id}><b>{o.reference}</b><span>{o.vendor}<small>{o.service} • {orderSummary(o)}</small></span><Status value={o.status}/><strong>{money(o.total)}</strong><OrderAction order={o} act={act} busy={busy}/></div>)}{!orders.length&&<Empty title="No matching work" copy="New activity will appear here automatically."/>}</div>}
 function OrderAction({order,act,busy}:{order:Order;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){if(terminalStatuses.includes(order.status))return null;return <div className="row-actions"><button className="danger" disabled={busy} onClick={()=>void act({action:"order.transition",id:order.id,to:"CANCELLED_BY_ADMIN"})}>Cancel</button></div>}
 
-function Admin({state,act,busy,retry}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean;retry:()=>Promise<void>}){const [page,setPage]=useState("Dashboard");const orders=state.orders;const gmv=orders.reduce((s,x)=>s+x.total,0);const active=orders.filter((x)=>!terminalStatuses.includes(x.status));const rides=orders.filter((x)=>x.service==="Bike Taxi");const parcels=orders.filter((x)=>x.service==="Parcel");return <Shell page={page} setPage={setPage} state={state}>{page==="Dashboard"&&<><div className="overview"><span><small>Command center</small><h2>Operations at a glance.</h2></span><b>LIVE DATA</b></div><Kpis items={[[money(gmv),"Total GMV","All services"],[String(orders.length),"Total orders & jobs","Live"],[String(active.length),"Active operations","Now"],[String(state.services.filter((x)=>x.enabled).length),"Enabled services","of 6"]]}/><section className="panel"><div><span><h2>Live operations</h2><small>Customer, vendor and partner activity</small></span></div><OrdersTable orders={active.slice(0,7)} act={act} busy={busy}/></section></>}{page==="Live Orders"&&<AdminLiveOrders/>}{["Live Operations","Orders"].includes(page)&&<WorkspacePage eyebrow="REALTIME OPERATIONS" title={page} copy="Monitor status and intervene when necessary."><OrdersTable orders={page==="Orders"?orders:active} act={act} busy={busy}/></WorkspacePage>}{page==="Rides"&&<WorkspacePage eyebrow="RIDE ENGINE" title="Bike taxi" copy="Ride requests, driver assignments and completions."><OrdersTable orders={rides} act={act} busy={busy}/></WorkspacePage>}{page==="Parcels"&&<WorkspacePage eyebrow="PARCEL ENGINE" title="Parcel operations" copy="Pickup, transit and delivery verification."><OrdersTable orders={parcels} act={act} busy={busy}/></WorkspacePage>}{page==="Catalog"&&<AdminCatalog state={state} act={act} busy={busy} retry={retry}/>} {page==="Discounts & Pricing"&&<AdminDiscounts/>} {page==="Settings"&&<AdminSettings state={state} act={act}/>} {page==="Finance"&&<AdminFinance/>} {page==="Vendors"&&<AdminVendors/>} {page==="Delivery Partners"&&<AdminPartners/>} {page==="Customers"&&<AdminCustomers/>} {page==="Support"&&<Directory title="Support tickets" rows={[["#TKT-1042","Order delayed","Open"],["#TKT-1039","Payment issue","In progress"],["#TKT-1034","Missing item","Resolved"]]}/>} {page==="Reports"&&<StatsPage title="Performance reports" stats={commerce.map((x)=>[x,`${orders.filter((o)=>o.service===x).length} orders`])}/>}</Shell>}
+function Admin({state,act,busy,retry}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean;retry:()=>Promise<void>}){const [page,setPage]=useState("Dashboard");const orders=state.orders;const gmv=orders.reduce((s,x)=>s+x.total,0);const active=orders.filter((x)=>!terminalStatuses.includes(x.status));const rides=orders.filter((x)=>x.service==="Bike Taxi");const parcels=orders.filter((x)=>x.service==="Parcel");return <Shell page={page} setPage={setPage} state={state}>{page==="Dashboard"&&<><div className="overview"><span><small>Command center</small><h2>Operations at a glance.</h2></span><b>LIVE DATA</b></div><Kpis items={[[money(gmv),"Total GMV","All services"],[String(orders.length),"Total orders & jobs","Live"],[String(active.length),"Active operations","Now"],[String(state.services.filter((x)=>x.enabled).length),"Enabled services","of 6"]]}/><section className="panel"><div><span><h2>Live operations</h2><small>Customer, vendor and partner activity</small></span></div><OrdersTable orders={active.slice(0,7)} act={act} busy={busy}/></section></>}{page==="Live Orders"&&<AdminLiveOrders/>}{["Live Operations","Orders"].includes(page)&&<WorkspacePage eyebrow="REALTIME OPERATIONS" title={page} copy="Monitor status and intervene when necessary."><OrdersTable orders={page==="Orders"?orders:active} act={act} busy={busy}/></WorkspacePage>}{page==="Rides"&&<WorkspacePage eyebrow="RIDE ENGINE" title="Bike taxi" copy="Ride requests, driver assignments and completions."><OrdersTable orders={rides} act={act} busy={busy}/></WorkspacePage>}{page==="Parcels"&&<WorkspacePage eyebrow="PARCEL ENGINE" title="Parcel operations" copy="Pickup, transit and delivery verification."><OrdersTable orders={parcels} act={act} busy={busy}/></WorkspacePage>}{page==="Catalog"&&<AdminCatalog state={state} act={act} busy={busy} retry={retry}/>} {page==="Discounts & Pricing"&&<AdminDiscounts/>} {page==="Automation"&&<AdminAutomation/>} {page==="Settings"&&<AdminSettings state={state} act={act}/>} {page==="Finance"&&<AdminFinance/>} {page==="Vendors"&&<AdminVendors/>} {page==="Delivery Partners"&&<AdminPartners/>} {page==="Customers"&&<AdminCustomers/>} {page==="Support"&&<Directory title="Support tickets" rows={[["#TKT-1042","Order delayed","Open"],["#TKT-1039","Payment issue","In progress"],["#TKT-1034","Missing item","Resolved"]]}/>} {page==="Reports"&&<StatsPage title="Performance reports" stats={commerce.map((x)=>[x,`${orders.filter((o)=>o.service===x).length} orders`])}/>}</Shell>}
 function AdminCatalog({state,act,busy,retry}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean;retry:()=>Promise<void>}){
   const [showCreate,setShowCreate]=useState(false);
   const [error,setError]=useState("");
@@ -105,7 +105,69 @@ function CreateProductForm({onCreated}:{onCreated:()=>void}){
 }
 function AdminSettings({state,act}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>}){return <WorkspacePage eyebrow="SERVICE AREA" title="Jangareddigudem" copy="Enable services independently for this operating area."><div className="setting-list">{state.services.map((s)=><article key={s.service}><i>{s.service[0]}</i><span><b>{s.service}</b><small>{s.enabled?"Available to customers":"Temporarily unavailable"}</small></span><button className={s.enabled?"toggle on":"toggle"} onClick={()=>void act({action:"service.toggle",service:s.service,enabled:!s.enabled})}><i/></button></article>)}</div></WorkspacePage>}
 
-type AdminRestaurant = { id:string; name:string; area:string; isOpen:boolean; status:string; manualOrderAcceptance:boolean; owner:{id:string;name:string;email:string}|null; offers:{id:string;title:string;description:string|null}[] };
+type AdminAutomationSettings = {
+  featureFlags:Record<string,boolean>;
+  dispatch:{ offerTimeoutSeconds:number; initialRadiusKm:number; maxRadiusKm:number; radiusStepKm:number; maxOfferAttempts:number; averageCitySpeedKmph:number; targetArrivalBufferMinutes:number; weights:Record<string,number> };
+  vendor:{ smartAutoAcceptEnabled:boolean; defaultMaxSimultaneousOrders:number; defaultAveragePreparationMinutes:number; defaultMaximumQueue:number };
+};
+
+const AUTOMATION_FLAGS:{key:string;label:string;copy:string}[] = [
+  {key:"smart_dispatch",label:"Smart delivery dispatch",copy:"Scores partners by distance, ETA, availability, reliability and workload."},
+  {key:"vendor_auto_accept",label:"Vendor auto accept",copy:"Lets eligible restaurants accept orders automatically when they are open and not overloaded."},
+  {key:"smart_coupons",label:"Smart coupons",copy:"Reserved switch for behavior-based offers and recovery discounts."},
+  {key:"order_recovery",label:"Order recovery",copy:"Reserved switch for abandoned cart and failed order recovery."},
+  {key:"loyalty",label:"Loyalty & wallet",copy:"Reserved switch for future wallet, coins and membership flows."},
+  {key:"fraud_detection",label:"Risk checks",copy:"Reserved switch for duplicate/fraud pattern detection."}
+];
+
+function AdminAutomation(){
+  const [settings,setSettings]=useState<AdminAutomationSettings|null>(null);
+  const [form,setForm]=useState<AdminAutomationSettings|null>(null);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const [saved,setSaved]=useState("");
+  const load=useCallback(async()=>{try{const r=await adminApi<{settings:AdminAutomationSettings}>("/automation/settings");setSettings(r.settings);setForm(r.settings);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load automation settings");}},[]);
+  useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
+  const setFlag=(key:string,value:boolean)=>{if(!form)return;setForm({...form,featureFlags:{...form.featureFlags,[key]:value}});};
+  const setDispatch=(key:keyof AdminAutomationSettings["dispatch"],value:number)=>{if(!form)return;setForm({...form,dispatch:{...form.dispatch,[key]:value}});};
+  const setVendor=(key:keyof AdminAutomationSettings["vendor"],value:number|boolean)=>{if(!form)return;setForm({...form,vendor:{...form.vendor,[key]:value}});};
+  const save=async()=>{if(!form)return;setBusy(true);setError("");setSaved("");try{const r=await adminApi<{settings:AdminAutomationSettings}>("/automation/settings",{method:"PATCH",body:JSON.stringify(form)});setSettings(r.settings);setForm(r.settings);setSaved("Automation settings saved. New orders will use this flow.");setTimeout(()=>setSaved(""),3000);}catch(e){setError(e instanceof Error?e.message:"Could not save automation settings");}finally{setBusy(false);}};
+  if(!form)return <WorkspacePage eyebrow="AUTOMATION CONTROL" title="Automation" copy="Loading smart dispatch and vendor automation settings.">{error?<p className="auth-error">{error}</p>:<Empty title="Loading…" copy="Fetching automation rules."/>}</WorkspacePage>;
+  const activeFlags=Object.values(form.featureFlags).filter(Boolean).length;
+  return <WorkspacePage eyebrow="AUTOMATION CONTROL" title="Smart operations" copy="Control which automatic flows are live. These settings affect fresh orders without redeploying the app.">
+    {error&&<p className="auth-error">{error}</p>}
+    {saved&&<p className="success-note">{saved}</p>}
+    <Kpis items={[[String(activeFlags),"Active automation flags","Platform"],[`${form.dispatch.initialRadiusKm}-${form.dispatch.maxRadiusKm} km`,"Dispatch search radius","Auto expands"],[`${form.dispatch.offerTimeoutSeconds}s`,"Partner offer timer","Before retry"],[String(form.vendor.defaultMaxSimultaneousOrders),"Default vendor capacity","Orders"]]}/>
+    <section className="panel">
+      <div><span><h2>Live switches</h2><small>Turn major automatic flows on or off from admin.</small></span></div>
+      <div className="setting-list">{AUTOMATION_FLAGS.map((flag)=><article key={flag.key}><i>{flag.label[0]}</i><span><b>{flag.label}</b><small>{flag.copy}</small></span><button className={form.featureFlags[flag.key]?"toggle on":"toggle"} onClick={()=>setFlag(flag.key,!form.featureFlags[flag.key])}><i/></button></article>)}</div>
+    </section>
+    <section className="panel">
+      <div><span><h2>Smart delivery dispatch</h2><small>Partner matching now scores real readiness, distance and workload.</small></span></div>
+      <form className="auth-form inline-form">
+        <label>Offer timeout (seconds)<input type="number" min="10" max="180" value={form.dispatch.offerTimeoutSeconds} onChange={(e)=>setDispatch("offerTimeoutSeconds",Number(e.target.value))}/></label>
+        <label>Initial radius (km)<input type="number" min="0.5" step="0.5" value={form.dispatch.initialRadiusKm} onChange={(e)=>setDispatch("initialRadiusKm",Number(e.target.value))}/></label>
+        <label>Maximum radius (km)<input type="number" min="1" step="0.5" value={form.dispatch.maxRadiusKm} onChange={(e)=>setDispatch("maxRadiusKm",Number(e.target.value))}/></label>
+        <label>Radius step (km)<input type="number" min="0.5" step="0.5" value={form.dispatch.radiusStepKm} onChange={(e)=>setDispatch("radiusStepKm",Number(e.target.value))}/></label>
+        <label>Maximum offer attempts<input type="number" min="1" max="10" value={form.dispatch.maxOfferAttempts} onChange={(e)=>setDispatch("maxOfferAttempts",Number(e.target.value))}/></label>
+        <label>City speed estimate (km/h)<input type="number" min="5" max="80" value={form.dispatch.averageCitySpeedKmph} onChange={(e)=>setDispatch("averageCitySpeedKmph",Number(e.target.value))}/></label>
+        <label>Arrival buffer (minutes)<input type="number" min="0" max="30" value={form.dispatch.targetArrivalBufferMinutes} onChange={(e)=>setDispatch("targetArrivalBufferMinutes",Number(e.target.value))}/></label>
+      </form>
+    </section>
+    <section className="panel">
+      <div><span><h2>Vendor smart auto accept</h2><small>Restaurants can auto-accept only while open, active and below capacity.</small></span></div>
+      <form className="auth-form inline-form">
+        <label className="checkbox-label"><input type="checkbox" checked={form.vendor.smartAutoAcceptEnabled} onChange={(e)=>setVendor("smartAutoAcceptEnabled",e.target.checked)}/>Enable smart vendor auto-accept globally</label>
+        <label>Default max live orders<input type="number" min="1" max="200" value={form.vendor.defaultMaxSimultaneousOrders} onChange={(e)=>setVendor("defaultMaxSimultaneousOrders",Number(e.target.value))}/></label>
+        <label>Default preparation minutes<input type="number" min="1" max="240" value={form.vendor.defaultAveragePreparationMinutes} onChange={(e)=>setVendor("defaultAveragePreparationMinutes",Number(e.target.value))}/></label>
+        <label>Default queue limit<input type="number" min="1" max="500" value={form.vendor.defaultMaximumQueue} onChange={(e)=>setVendor("defaultMaximumQueue",Number(e.target.value))}/></label>
+      </form>
+    </section>
+    <button className="primary" disabled={busy||JSON.stringify(settings)===JSON.stringify(form)} onClick={()=>void save()}>{busy?"Saving…":"Save automation"}</button>
+  </WorkspacePage>;
+}
+
+type AdminRestaurant = { id:string; name:string; area:string; isOpen:boolean; status:string; manualOrderAcceptance:boolean; autoAcceptanceMode:"MANUAL"|"AUTOMATIC"|"SMART_AUTOMATIC"; temporaryBusyMode:boolean; maxSimultaneousOrders:number; averagePreparationMinutes:number; maximumQueue:number; owner:{id:string;name:string;email:string}|null; offers:{id:string;title:string;description:string|null}[] };
 type AdminVendorUser = { id:string; name:string; email:string; role:string; status:string };
 type AdminVendorTeamMember = { id:string; name:string; email:string; phone:string|null; role:string; status:string; staffTitle:string|null; isPrimaryOwner:boolean; permissions:string[] };
 async function adminApi<T>(path:string,init?:RequestInit):Promise<T>{const res=await fetch(`/api/v1/admin${path}`,{...init,headers:{"content-type":"application/json",...init?.headers}});const json=await res.json() as {success:boolean;data?:T;error?:{message:string}};if(!json.success||!json.data)throw new Error(json.error?.message||"Request failed");return json.data;}
@@ -121,6 +183,7 @@ function AdminVendors(){
   const [expanded,setExpanded]=useState<string|null>(null);
   const [expandedOffers,setExpandedOffers]=useState<string|null>(null);
   const [expandedMenu,setExpandedMenu]=useState<string|null>(null);
+  const [expandedAutomation,setExpandedAutomation]=useState<string|null>(null);
   const load=useCallback(async()=>{try{const [r,v]=await Promise.all([adminApi<{restaurants:AdminRestaurant[]}>("/restaurants"),adminApi<{vendors:AdminVendorUser[]}>("/vendors")]);setRestaurants(r.restaurants);setVendors(v.vendors);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load vendors");}},[]);
   useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
   const assign=async(restaurantId:string,userId:string)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/owner`,{method:"PATCH",body:JSON.stringify({userId:userId||null})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not assign owner");}finally{setBusy(false);}};
@@ -134,7 +197,7 @@ function AdminVendors(){
     <div className="directory">{restaurants.map((r)=><article key={r.id} className="vendor-row">
       <div className="vendor-row-head">
         <i>{r.name[0]}</i>
-        <span><b>{r.name}</b><small>{r.area} • {r.isOpen?"Open":"Closed"} • {r.status}{r.owner?` • Owned by ${r.owner.name}`:" • Unassigned"}</small></span>
+        <span><b>{r.name}</b><small>{r.area} • {r.isOpen?"Open":"Closed"} • {r.status} • {label(r.autoAcceptanceMode)}{r.temporaryBusyMode?" • Busy mode":""}{r.owner?` • Owned by ${r.owner.name}`:" • Unassigned"}</small></span>
         <button className="toggle-labelled" onClick={()=>void toggleManual(r)} disabled={busy} title="Require Vendor Order Acceptance">
           <span className={r.manualOrderAcceptance?"toggle on":"toggle"}><i/></span>
           <small>{r.manualOrderAcceptance?"Manual accept ON":"Auto-accept ON"}</small>
@@ -146,10 +209,12 @@ function AdminVendors(){
           {vendors.map((v)=><option key={v.id} value={v.id}>{v.name} ({v.email})</option>)}
         </select>
         <button className="secondary" onClick={()=>setExpanded(expanded===r.id?null:r.id)}>{expanded===r.id?"Hide team":"Manage team"}</button>
+        <button className="secondary" onClick={()=>setExpandedAutomation(expandedAutomation===r.id?null:r.id)}>{expandedAutomation===r.id?"Hide automation":"Automation"}</button>
         <button className="secondary" onClick={()=>setExpandedOffers(expandedOffers===r.id?null:r.id)}>{expandedOffers===r.id?"Hide offers":`Manage offers (${r.offers.length})`}</button>
         <button className="secondary" onClick={()=>setExpandedMenu(expandedMenu===r.id?null:r.id)}>{expandedMenu===r.id?"Hide menu":"Manage menu"}</button>
       </div>
       {expanded===r.id&&<VendorTeamPanel restaurantId={r.id}/>}
+      {expandedAutomation===r.id&&<RestaurantAutomationPanel restaurant={r} onChange={load}/>}
       {expandedOffers===r.id&&<VendorOffersPanel restaurantId={r.id} offers={r.offers} onChange={load}/>}
       {expandedMenu===r.id&&<VendorMenuPanel restaurantId={r.id}/>}
     </article>)}</div>}
@@ -181,6 +246,46 @@ function CreateVendorForm({onCreated}:{onCreated:()=>void}){
     <label className="checkbox-label"><input type="checkbox" checked={form.manualOrderAcceptance} onChange={(e)=>setForm({...form,manualOrderAcceptance:e.target.checked})}/>Require vendor order acceptance</label>
     {error&&<p className="auth-error">{error}</p>}
     <button className="primary" disabled={busy}>{busy?"Creating…":"Create vendor"}</button>
+  </form>;
+}
+
+function RestaurantAutomationPanel({restaurant,onChange}:{restaurant:AdminRestaurant;onChange:()=>Promise<void>}){
+  const [form,setForm]=useState({
+    autoAcceptanceMode:restaurant.autoAcceptanceMode||"MANUAL",
+    temporaryBusyMode:restaurant.temporaryBusyMode,
+    maxSimultaneousOrders:String(restaurant.maxSimultaneousOrders||12),
+    averagePreparationMinutes:String(restaurant.averagePreparationMinutes||25),
+    maximumQueue:String(restaurant.maximumQueue||20)
+  });
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const save=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
+    try{
+      await adminApi(`/restaurants/${restaurant.id}/automation`,{method:"PATCH",body:JSON.stringify({
+        autoAcceptanceMode:form.autoAcceptanceMode,
+        temporaryBusyMode:form.temporaryBusyMode,
+        maxSimultaneousOrders:Number(form.maxSimultaneousOrders),
+        averagePreparationMinutes:Number(form.averagePreparationMinutes),
+        maximumQueue:Number(form.maximumQueue)
+      })});
+      await onChange();
+    }catch(e){setError(e instanceof Error?e.message:"Could not save restaurant automation");}finally{setBusy(false);}
+  };
+  return <form className="auth-form inline-form" onSubmit={(e)=>void save(e)}>
+    <label>Acceptance flow
+      <select value={form.autoAcceptanceMode} onChange={(e)=>setForm({...form,autoAcceptanceMode:e.target.value as AdminRestaurant["autoAcceptanceMode"]})}>
+        <option value="MANUAL">Manual accept in Vendor App</option>
+        <option value="AUTOMATIC">Always auto-accept</option>
+        <option value="SMART_AUTOMATIC">Smart auto-accept by capacity</option>
+      </select>
+    </label>
+    <label>Max simultaneous live orders<input required type="number" min="1" max="200" value={form.maxSimultaneousOrders} onChange={(e)=>setForm({...form,maxSimultaneousOrders:e.target.value})}/></label>
+    <label>Average preparation minutes<input required type="number" min="1" max="240" value={form.averagePreparationMinutes} onChange={(e)=>setForm({...form,averagePreparationMinutes:e.target.value})}/></label>
+    <label>Maximum queue<input required type="number" min="1" max="500" value={form.maximumQueue} onChange={(e)=>setForm({...form,maximumQueue:e.target.value})}/></label>
+    <label className="checkbox-label"><input type="checkbox" checked={form.temporaryBusyMode} onChange={(e)=>setForm({...form,temporaryBusyMode:e.target.checked})}/>Temporary busy mode</label>
+    <p className="muted-note">Smart auto-accept only works when the restaurant is open, active, not in busy mode, and below these limits.</p>
+    {error&&<p className="auth-error">{error}</p>}
+    <button className="primary" disabled={busy}>{busy?"Saving…":"Save restaurant automation"}</button>
   </form>;
 }
 
