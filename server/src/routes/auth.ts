@@ -20,6 +20,8 @@ import { ok, fail, EMAIL_RE, PHONE_RE } from "../lib/http.js";
 
 export const authRouter = Router();
 
+const USERNAME_RE = /^[a-z0-9_.]{3,30}$/;
+
 // Real IP-based limits, on top of issueOtp()'s own per-identifier cooldown/
 // window — this stops one IP from hammering the endpoint across many
 // different email addresses to burn through Gmail's sending quota.
@@ -31,6 +33,7 @@ const authAttemptLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 30, standar
 const publicUser = (u: any) => ({
   id: String(u._id),
   email: u.email,
+  username: u.username ?? null,
   phone: u.phone ?? null,
   name: u.name,
   role: u.role,
@@ -46,6 +49,7 @@ const publicUser = (u: any) => ({
 async function handleSignup(req: Request, res: Response) {
   try {
     const email = String(req.body?.email ?? "").trim().toLowerCase();
+    const username = String(req.body?.username ?? "").trim().toLowerCase();
     const password = String(req.body?.password ?? "");
     const name = String(req.body?.name ?? "").trim();
     // Optional here — the Customer app's own signup form requires it and
@@ -55,13 +59,15 @@ async function handleSignup(req: Request, res: Response) {
     const phone = req.body?.phone !== undefined ? String(req.body.phone).trim() : undefined;
 
     if (!EMAIL_RE.test(email)) return res.status(400).json(fail("INVALID_EMAIL", "Enter a valid email address"));
+    if (username && !USERNAME_RE.test(username)) return res.status(400).json(fail("INVALID_USERNAME", "Use 3–30 lowercase letters, numbers, dots or underscores for username"));
     if (phone && !PHONE_RE.test(phone)) return res.status(400).json(fail("INVALID_PHONE", "Enter a valid mobile number"));
     if (password.length < 8) return res.status(400).json(fail("WEAK_PASSWORD", "Password must be at least 8 characters"));
     if (name.length < 2) return res.status(400).json(fail("INVALID_NAME", "Enter your full name"));
     if (await User.exists({ email })) return res.status(409).json(fail("EMAIL_TAKEN", "An account with this email already exists"));
+    if (username && (await User.exists({ username }))) return res.status(409).json(fail("USERNAME_TAKEN", "This username is already taken"));
     if (phone && (await User.exists({ phone }))) return res.status(409).json(fail("PHONE_TAKEN", "An account with this mobile number already exists"));
 
-    const user = await User.create({ email, ...(phone ? { phone } : {}), name, passwordHash: await hashPassword(password), role: defaultRoleForEmail(email), status: "ACTIVE" });
+    const user = await User.create({ email, ...(username ? { username } : {}), ...(phone ? { phone } : {}), name, passwordHash: await hashPassword(password), role: defaultRoleForEmail(email), status: "ACTIVE" });
     const token = await createSession(user._id, { ip: req.ip, userAgent: req.header("user-agent") });
     setSessionCookie(res, token);
     res.json(ok({ user: publicUser(user), token }, "Account created"));
@@ -72,15 +78,16 @@ async function handleSignup(req: Request, res: Response) {
 
 async function handleLogin(req: Request, res: Response) {
   try {
-    const email = String(req.body?.email ?? "").trim().toLowerCase();
+    const identifier = String(req.body?.identifier ?? req.body?.email ?? "").trim().toLowerCase();
     const password = String(req.body?.password ?? "");
-    if (!EMAIL_RE.test(email) || !password) return res.status(400).json(fail("INVALID_CREDENTIALS", "Enter your email and password"));
+    const isIdentifier = EMAIL_RE.test(identifier) || PHONE_RE.test(identifier) || USERNAME_RE.test(identifier);
+    if (!isIdentifier || !password) return res.status(400).json(fail("INVALID_CREDENTIALS", "Enter your email, phone or username and password"));
 
-    const user: any = await User.findOne({ email });
+    const user: any = await User.findOne({ $or: [{ email: identifier }, { phone: identifier }, { username: identifier }] });
     // Same generic message whether the account is missing or the password is
     // wrong, so the endpoint can't be used to enumerate registered emails.
     if (!user?.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
-      return res.status(401).json(fail("INVALID_CREDENTIALS", "Incorrect email or password"));
+      return res.status(401).json(fail("INVALID_CREDENTIALS", "Incorrect email, phone, username or password"));
     }
     if (user.status !== "ACTIVE") return res.status(403).json(fail("ACCOUNT_DISABLED", "This account is not active"));
 

@@ -21,6 +21,7 @@ export type CustomerUser = {
   name: string;
   phone: string;
   email?: string;
+  username?: string | null;
   role?: string;
   isDemo: boolean;
 };
@@ -136,6 +137,15 @@ export type Coupon = {
   targetRestaurantNames: string[];
   targetFoodItemIds: string[];
   targetFoodItemNames: string[];
+  targetFoodItems?: {
+    id: string;
+    restaurantId: string;
+    restaurantName: string;
+    name: string;
+    price: number;
+    veg: boolean;
+    imageUrl: string | null;
+  }[];
   showOnHome: boolean;
 };
 

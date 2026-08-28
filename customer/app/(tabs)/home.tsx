@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
@@ -11,6 +11,8 @@ import { SERVICES } from "@/constants/services";
 import { restaurantService } from "@/services/RestaurantService";
 import { colors, radius, spacing, typography } from "@/theme";
 import { Icon } from "@/components/Icon";
+import { RemoteImage } from "@/components/RemoteImage";
+import { VegBadge } from "@/components/VegBadge";
 import { useLocationStore } from "@/store/useLocationStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useCatalogStore } from "@/store/useCatalogStore";
@@ -23,6 +25,18 @@ export default function HomeScreen() {
   const [popular, setPopular] = useState<Restaurant[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const discountedItems = useMemo(() => {
+    const seen = new Set<string>();
+    return coupons
+      .filter((coupon) => coupon.showOnHome !== false)
+      .flatMap((coupon) => (coupon.targetFoodItems ?? []).map((item) => ({ ...item, code: coupon.code, offer: offerLabel(coupon) })))
+      .filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      })
+      .slice(0, 10);
+  }, [coupons]);
 
   const load = useCallback(async () => {
     try {
@@ -88,6 +102,17 @@ export default function HomeScreen() {
         </View>
 
         <SearchBar placeholder="Search dishes, groceries, stores…" editable={false} onPress={() => router.push("/(tabs)/search")} />
+
+        {discountedItems.length > 0 && (
+          <View style={styles.discountSection}>
+            <SectionHeader title="Discounted items" subtitle="Live offers picked from admin" />
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.discountScroll}>
+              {discountedItems.map((item) => (
+                <DiscountItemCard key={item.id} item={item} />
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
         {coupons.some((coupon) => coupon.showOnHome !== false) && (
           <View style={styles.offersSection}>
@@ -155,8 +180,39 @@ export default function HomeScreen() {
   );
 }
 
+function offerLabel(coupon: Coupon) {
+  if (coupon.type === "FREE_DELIVERY") return "FREE DELIVERY";
+  if (coupon.type === "PERCENT") return `${coupon.value}% OFF`;
+  return `₹${coupon.value} OFF`;
+}
+
+function DiscountItemCard({ item }: { item: NonNullable<Coupon["targetFoodItems"]>[number] & { code: string; offer: string } }) {
+  return (
+    <Pressable
+      style={styles.discountCard}
+      onPress={() => router.push({ pathname: "/food/restaurant/[id]", params: { id: item.restaurantId } })}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.name}, ${item.offer}`}
+    >
+      <RemoteImage uri={item.imageUrl} fallbackLabel={item.name} style={styles.discountImage} />
+      <View style={styles.discountBody}>
+        <View style={styles.discountTopRow}>
+          <VegBadge veg={item.veg} />
+          <Text style={styles.discountOffer}>{item.offer}</Text>
+        </View>
+        <Text style={styles.discountName} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.discountMeta} numberOfLines={1}>{item.restaurantName || "Restaurant offer"}</Text>
+        <View style={styles.discountBottomRow}>
+          <Text style={styles.discountPrice}>₹{item.price}</Text>
+          <Text style={styles.discountCode}>{item.code}</Text>
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
 function HomeOfferCard({ coupon }: { coupon: Coupon }) {
-  const discount = coupon.type === "FREE_DELIVERY" ? "FREE DELIVERY" : coupon.type === "PERCENT" ? `${coupon.value}% OFF` : `₹${coupon.value} OFF`;
+  const discount = offerLabel(coupon);
   const scope = (coupon.targetFoodItemNames ?? []).length
     ? coupon.targetFoodItemNames.slice(0, 2).join(" • ")
     : (coupon.targetRestaurantNames ?? []).length
@@ -218,6 +274,25 @@ const styles = StyleSheet.create({
   serviceGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   offersSection: { marginTop: -spacing.sm },
   offerScroll: { gap: spacing.md, paddingRight: spacing.xl },
+  discountSection: { marginTop: -spacing.sm },
+  discountScroll: { gap: spacing.md, paddingRight: spacing.xl },
+  discountCard: {
+    width: 218,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    overflow: "hidden",
+  },
+  discountImage: { width: "100%", height: 106 },
+  discountBody: { padding: spacing.md, gap: 5 },
+  discountTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  discountOffer: { color: colors.primary, fontSize: 10, fontWeight: "900", letterSpacing: 0.5 },
+  discountName: { ...typography.bodyStrong },
+  discountMeta: { ...typography.caption, color: colors.muted },
+  discountBottomRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 2 },
+  discountPrice: { ...typography.bodyStrong },
+  discountCode: { color: colors.primary, fontSize: 10, fontWeight: "900" },
   offerCard: { width: 238, backgroundColor: "#FFF1EB", borderWidth: 1, borderColor: "#FFD2C2", borderRadius: radius.lg, padding: spacing.lg, gap: 5 },
   offerBadge: { alignSelf: "flex-start", backgroundColor: colors.primary, borderRadius: radius.sm, paddingHorizontal: 9, paddingVertical: 5 },
   offerBadgeText: { color: colors.white, fontSize: 11, fontWeight: "900", letterSpacing: 0.5 },

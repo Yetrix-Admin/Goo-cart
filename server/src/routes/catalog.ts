@@ -136,12 +136,14 @@ catalogRouter.get("/coupons", async (_req, res) => {
     const rows = await Coupon.find({ active: true }).lean();
     const restaurantIds = [...new Set(rows.flatMap((c: any) => (c.targetRestaurantIds ?? []).map(String)))];
     const foodItemIds = [...new Set(rows.flatMap((c: any) => (c.targetFoodItemIds ?? []).map(String)))];
-    const [restaurants, foodItems] = await Promise.all([
-      restaurantIds.length ? Restaurant.find({ _id: { $in: restaurantIds } }, { name: 1 }).lean() : [],
-      foodItemIds.length ? FoodItem.find({ _id: { $in: foodItemIds } }, { name: 1 }).lean() : [],
-    ]);
+    const foodItems = foodItemIds.length ? await FoodItem.find({ _id: { $in: foodItemIds } }, { restaurantId: 1, name: 1, price: 1, veg: 1, imageUrl: 1 }).lean() : [];
+    const foodRestaurantIds = foodItems.map((f: any) => String(f.restaurantId));
+    const restaurants = [...new Set([...restaurantIds, ...foodRestaurantIds])].length
+      ? await Restaurant.find({ _id: { $in: [...new Set([...restaurantIds, ...foodRestaurantIds])] } }, { name: 1 }).lean()
+      : [];
     const restaurantNames = new Map(restaurants.map((r: any) => [String(r._id), r.name]));
     const foodItemNames = new Map(foodItems.map((f: any) => [String(f._id), f.name]));
+    const foodItemsById = new Map(foodItems.map((f: any) => [String(f._id), f]));
     res.json(
       ok({
         coupons: rows.map((c: any) => ({
@@ -156,6 +158,18 @@ catalogRouter.get("/coupons", async (_req, res) => {
           targetRestaurantNames: (c.targetRestaurantIds ?? []).map((id: unknown) => restaurantNames.get(String(id))).filter(Boolean),
           targetFoodItemIds: (c.targetFoodItemIds ?? []).map(String),
           targetFoodItemNames: (c.targetFoodItemIds ?? []).map((id: unknown) => foodItemNames.get(String(id))).filter(Boolean),
+          targetFoodItems: (c.targetFoodItemIds ?? [])
+            .map((id: unknown) => foodItemsById.get(String(id)))
+            .filter(Boolean)
+            .map((f: any) => ({
+              id: String(f._id),
+              restaurantId: String(f.restaurantId),
+              restaurantName: restaurantNames.get(String(f.restaurantId)) ?? "",
+              name: f.name,
+              price: f.price,
+              veg: f.veg,
+              imageUrl: f.imageUrl,
+            })),
           showOnHome: c.showOnHome !== false,
         })),
       }),

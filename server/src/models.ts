@@ -37,6 +37,7 @@ const addressSchema = new Schema(
 const userSchema = new Schema(
   {
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    username: { type: String, default: undefined, lowercase: true, trim: true },
     // Leave absent for email-only accounts. A unique sparse index ignores a
     // missing field, but MongoDB treats an explicit null as an indexed value.
     phone: { type: String, default: undefined },
@@ -80,6 +81,7 @@ const userSchema = new Schema(
   },
   opts,
 );
+userSchema.index({ username: 1 }, { unique: true, sparse: true });
 userSchema.index({ phone: 1 }, { unique: true, sparse: true });
 
 const sessionSchema = new Schema(

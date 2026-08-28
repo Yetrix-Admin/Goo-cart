@@ -14,12 +14,12 @@ type AuthState = {
   token: string | null;
   hasHydrated: boolean;
   hydrate: () => Promise<void>;
-  signUp: (email: string, phone: string, password: string, name: string) => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (input: { email: string; phone: string; username: string; password: string; name: string }) => Promise<void>;
+  signIn: (identifier: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
-type TokenResponse = { token: string; user: { id: string; email: string; name: string; role: string; status: string; phone?: string | null } };
+type TokenResponse = { token: string; user: { id: string; email: string; username?: string | null; name: string; role: string; status: string; phone?: string | null } };
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
@@ -46,13 +46,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  signUp: async (email, phone, password, name) => {
-    const data = await apiPost<TokenResponse>("/api/v1/auth/token", { mode: "signup", email, phone, password, name });
+  signUp: async (input) => {
+    const data = await apiPost<TokenResponse>("/api/v1/auth/token", { mode: "signup", ...input });
     await persist(data, set);
   },
 
-  signIn: async (email, password) => {
-    const data = await apiPost<TokenResponse>("/api/v1/auth/token", { mode: "login", email, password });
+  signIn: async (identifier, password) => {
+    const data = await apiPost<TokenResponse>("/api/v1/auth/token", { mode: "login", identifier, password });
     await persist(data, set);
   },
 
@@ -69,6 +69,7 @@ async function persist(data: TokenResponse, set: (partial: Partial<AuthState>) =
     id: data.user.id,
     name: data.user.name,
     email: data.user.email,
+    username: data.user.username ?? null,
     role: data.user.role,
     phone: data.user.phone ?? "",
     isDemo: false,
