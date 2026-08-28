@@ -16,6 +16,7 @@ import { notificationsRouter } from "./routes/notifications.js";
 import { fail, ok } from "./lib/http.js";
 import { initRealtime } from "./lib/realtime.js";
 import { startAcceptanceWatchdog } from "./lib/acceptanceWatchdog.js";
+import { startReservationWatchdog } from "./lib/inventory.js";
 
 dotenv.config();
 // Local secrets can be split from the Atlas connection file. Both files are
@@ -110,6 +111,7 @@ if (!isServerless) {
     .then(() => {
       console.log(`MongoDB connected (database: ${dbName()}).`);
       startAcceptanceWatchdog();
+      startReservationWatchdog();
     })
     .catch((e) => {
       // Log loudly but keep serving: /health then reports the real state

@@ -179,6 +179,7 @@ ordersRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
           bill,
           deliveryAddress: body.deliveryAddress,
           deliveryOtp: generateOtp(),
+          pickupOtp: generateOtp(),
           estimatedDeliveryMinutes: restaurant.deliveryTimeMax,
           items: lines,
           // Only set when provided — see the schema comment on why an
@@ -327,6 +328,11 @@ ordersRouter.post("/:id/transition", requireAuth, async (req: AuthedRequest, res
       return res.json(ok({ order: toOrderDTO(result.order, user) }, "Delivery accepted"));
     }
 
+    // Pickup is only confirmed by the code the vendor holds — a partner
+    // cannot self-report a collection that never happened.
+    if (to === "PICKED_UP" && group === "partner" && String(req.body?.code ?? "").trim() !== order.pickupOtp) {
+      return res.status(401).json(fail("INVALID_CODE", "That pickup code is incorrect"));
+    }
     // Delivery is only confirmed by the OTP the customer holds.
     if (to === "DELIVERED" && group === "partner" && String(req.body?.code ?? "").trim() !== order.deliveryOtp) {
       return res.status(401).json(fail("INVALID_CODE", "That verification PIN is incorrect"));
@@ -494,6 +500,11 @@ export function toOrderDTO(o: any, viewer: any) {
   // The delivery OTP is the customer's proof of receipt — only they and the
   // assigned partner ever see it.
   const seesOtp = String(viewer._id) === String(o.customerId) || (o.partnerId && String(viewer._id) === String(o.partnerId));
+  // The pickup code is the vendor's proof of handoff — only the vendor sees
+  // it. The partner must be told it in person/on a vendor screen and type it
+  // in; an assigned partner reading it from their own order view would make
+  // the check meaningless.
+  const seesPickupOtp = canAdmin(viewer) || String(viewer.vendorId ?? "") === String(o.restaurantId);
 
   return {
     id: String(o._id),
@@ -517,6 +528,7 @@ export function toOrderDTO(o: any, viewer: any) {
     bill: o.bill,
     deliveryAddress: o.deliveryAddress,
     deliveryOtp: seesOtp ? o.deliveryOtp : null,
+    pickupOtp: seesPickupOtp ? o.pickupOtp : null,
     estimatedDeliveryMinutes: o.estimatedDeliveryMinutes,
     deliveryPartner: o.partnerId
       ? { id: String(o.partnerId), name: o.partnerName, latitude: null as number | null, longitude: null as number | null }

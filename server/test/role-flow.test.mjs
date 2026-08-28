@@ -168,11 +168,39 @@ test("customer -> vendor -> delivery partner flow is role-scoped and complete", 
   assert.equal(notEligible.json.error.code, "PARTNER_NOT_ELIGIBLE");
   await request("/api/v1/partner/online", { token: partner.token, method: "POST", body: { value: true } });
 
-  for (const to of ["DELIVERY_PARTNER_ASSIGNED", "GOING_TO_VENDOR", "ARRIVED_AT_VENDOR", "PICKED_UP", "ON_THE_WAY", "ARRIVED"]) {
+  // The pickup handoff code is vendor-only — the assigned partner is told it
+  // in person, not shown it in their own app — so it's fetched here as the
+  // vendor, the same way the delivery OTP above came from the customer's view.
+  const vendorView = await request(`/api/v1/orders/${orderId}`, { token: vendor.token });
+  const pickupOtp = vendorView.json.data.order.pickupOtp;
+  assert.match(pickupOtp, /^\d{4}$/);
+
+  for (const to of ["DELIVERY_PARTNER_ASSIGNED", "GOING_TO_VENDOR", "ARRIVED_AT_VENDOR"]) {
     const moved = await request(`/api/v1/orders/${orderId}/transition`, {
       token: partner.token,
       method: "POST",
       body: { to },
+    });
+    assert.equal(moved.status, 200, `${to}: ${JSON.stringify(moved.json)}`);
+  }
+
+  // The wrong pickup code is only meaningful to test once the order has
+  // actually reached ARRIVED_AT_VENDOR — before that it's rejected as an
+  // invalid state transition, not an invalid code, which would prove nothing
+  // about the OTP check itself.
+  const wrongPickupCode = await request(`/api/v1/orders/${orderId}/transition`, {
+    token: partner.token,
+    method: "POST",
+    body: { to: "PICKED_UP", code: "0000" },
+  });
+  assert.equal(wrongPickupCode.status, 401);
+  assert.equal(wrongPickupCode.json.error.code, "INVALID_CODE");
+
+  for (const to of ["PICKED_UP", "ON_THE_WAY", "ARRIVED"]) {
+    const moved = await request(`/api/v1/orders/${orderId}/transition`, {
+      token: partner.token,
+      method: "POST",
+      body: to === "PICKED_UP" ? { to, code: pickupOtp } : { to },
     });
     assert.equal(moved.status, 200, `${to}: ${JSON.stringify(moved.json)}`);
   }

@@ -97,14 +97,14 @@ test("manual vs auto vendor acceptance, and per-user accept permission", async (
   const ownerCreate = await request(`/api/v1/admin/restaurants/${restaurantManual._id}/users`, {
     token: admin.token,
     method: "POST",
-    body: { email: "owner@accept.test", name: "Owner", role: "VENDOR_OWNER", permissions: [] },
+    body: { email: "owner@accept.test", name: "Owner", role: "VENDOR_OWNER", permissions: [], initialPassword: "OwnerPass123!" },
   });
   assert.equal(ownerCreate.status, 200, JSON.stringify(ownerCreate.json));
 
   const kitchenCreate = await request(`/api/v1/admin/restaurants/${restaurantManual._id}/users`, {
     token: admin.token,
     method: "POST",
-    body: { email: "kitchen@accept.test", name: "Kitchen", role: "VENDOR_STAFF", permissions: ["CAN_VIEW_ORDERS", "CAN_UPDATE_ORDER_STATUS"] },
+    body: { email: "kitchen@accept.test", name: "Kitchen", role: "VENDOR_STAFF", permissions: ["CAN_VIEW_ORDERS", "CAN_UPDATE_ORDER_STATUS"], initialPassword: "KitchenPass123!" },
   });
   assert.equal(kitchenCreate.status, 200, JSON.stringify(kitchenCreate.json));
 
@@ -115,7 +115,7 @@ test("manual vs auto vendor acceptance, and per-user accept permission", async (
   const autoOwner = await request(`/api/v1/admin/restaurants/${restaurantAuto._id}/users`, {
     token: admin.token,
     method: "POST",
-    body: { email: "autoowner@accept.test", name: "Auto Owner", role: "VENDOR_OWNER", permissions: [] },
+    body: { email: "autoowner@accept.test", name: "Auto Owner", role: "VENDOR_OWNER", permissions: [], initialPassword: "AutoOwnerPass123!" },
   });
   assert.equal(autoOwner.status, 200, JSON.stringify(autoOwner.json));
 

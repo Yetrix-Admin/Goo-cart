@@ -287,6 +287,11 @@ const orderSchema = new Schema(
     },
     deliveryAddress: { type: Schema.Types.Mixed, required: true },
     deliveryOtp: { type: String, required: true },
+    // Vendor-facing handoff code: the delivery partner must key this in
+    // (given to them verbally/on-screen by the vendor) before PICKED_UP is
+    // accepted, so a partner cannot self-report a collection that never
+    // happened. Never sent to the customer or an unassigned partner.
+    pickupOtp: { type: String, required: true },
     estimatedDeliveryMinutes: { type: Number, default: 30 },
     partnerId: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
     partnerName: { type: String, default: null },
@@ -456,7 +461,30 @@ const pricingSettingsSchema = new Schema(
   { versionKey: false, timestamps: true },
 );
 
+// A stock hold created atomically alongside the matching Product decrement
+// (see lib/inventory.ts). Exists so overselling is prevented with a real
+// audit trail — not just a bare $inc — and so an abandoned checkout releases
+// its hold back to stock instead of the item staying short forever.
+const reservationSchema = new Schema(
+  {
+    productId: { type: Schema.Types.ObjectId, ref: "Product", required: true, index: true },
+    vendorId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    quantity: { type: Number, required: true, min: 1 },
+    customerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    orderId: { type: Schema.Types.ObjectId, ref: "ServiceOrder", default: null, index: true },
+    // RESERVED: stock held, not yet tied to a confirmed order.
+    // CONSUMED: the order this hold was for was confirmed; stock stays decremented.
+    // RELEASED: explicitly returned (checkout abandoned/failed) — stock restored.
+    // EXPIRED: nobody consumed it before expiresAt — stock restored by the sweep.
+    status: { type: String, required: true, default: "RESERVED", index: true },
+    expiresAt: { type: Date, required: true },
+  },
+  opts,
+);
+reservationSchema.index({ status: 1, expiresAt: 1 });
+
 export const Product = model("Product", productSchema);
+export const Reservation = model("Reservation", reservationSchema);
 export const ServiceOrder = model("ServiceOrder", serviceOrderSchema);
 export const VendorOffer = model("VendorOffer", vendorOfferSchema);
 export const PricingRule = model("PricingRule", pricingRuleSchema);

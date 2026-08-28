@@ -4,6 +4,7 @@ import { requireAuth, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
 import { isValidCoordinate } from "../lib/geo.js";
 import { getPricingSettings } from "../lib/pricingSettings.js";
+import { reserveLines, consumeReservations, releaseReservations } from "../lib/inventory.js";
 
 export const customerRouter = Router();
 customerRouter.use(requireAuth);
@@ -220,17 +221,38 @@ customerRouter.post("/service-orders", async (req: AuthedRequest, res) => {
     const vendorCommission = Math.round(subtotal * pricing.vendorCommissionPercent / 100);
     const vendorPayable = subtotal - vendorCommission;
     const total = subtotal + pricing.deliveryFee + pricing.platformFee + taxes;
-    for (const line of lines) {
-      const result = await Product.updateOne({ _id: line.product._id, stock: { $gte: line.quantity } }, { $inc: { stock: -line.quantity } });
-      if (!result.modifiedCount) return res.status(409).json(fail("OUT_OF_STOCK", `${line.product.name} just sold out.`));
+    // Reserve is atomic and all-or-nothing across every line (a Mongo
+    // transaction): either the whole cart's stock is held, or none of it is
+    // — a cart that fails on its third item can no longer leave the first
+    // two silently decremented with nothing to show for it.
+    const reserved = await reserveLines(lines.map((line) => ({ productId: line.product._id, quantity: line.quantity })), req.user!._id);
+    if (!reserved.ok) {
+      const failedLine = lines.find((line) => String(line.product._id) === reserved.productId);
+      return res.status(409).json(fail("OUT_OF_STOCK", `${failedLine?.product.name ?? "An item"} just sold out.`));
     }
+
     const prefix: Record<string, string> = { Grocery: "GR", Vegetables: "VG", Mart: "MT" };
     const reference = `GOO-${prefix[service]}-${new Date().getFullYear()}-${String(await nextSequence("serviceOrderNumber")).padStart(6, "0")}`;
-    const order = await ServiceOrder.create({
-      reference, service, vendorId: lines[0].product.vendorId, vendorName: lines[0].product.vendorName, customerId: req.user!._id, customerName: req.user!.name,
-      status: "READY_FOR_PICKUP", total,
-      details: { items: lines.map((line) => ({ productId: String(line.product._id), name: line.product.name, quantity: line.quantity, unitPrice: line.product.price, lineTotal: line.product.price * line.quantity })), address: body.address ?? null, subtotal, deliveryFee: pricing.deliveryFee, platformFee: pricing.platformFee, taxes, vendorCommission, vendorPayable, partnerPayout: pricing.deliveryPartnerPayout, platformNetRevenue: pricing.deliveryFee + pricing.platformFee + vendorCommission - pricing.deliveryPartnerPayout, verificationCode: String(Math.floor(1000 + Math.random() * 9000)) },
-    });
+    let order;
+    try {
+      order = await ServiceOrder.create({
+        reference, service, vendorId: lines[0].product.vendorId, vendorName: lines[0].product.vendorName, customerId: req.user!._id, customerName: req.user!.name,
+        status: "READY_FOR_PICKUP", total,
+        details: {
+          items: lines.map((line) => ({ productId: String(line.product._id), name: line.product.name, quantity: line.quantity, unitPrice: line.product.price, lineTotal: line.product.price * line.quantity })),
+          address: body.address ?? null, subtotal, deliveryFee: pricing.deliveryFee, platformFee: pricing.platformFee, taxes, vendorCommission, vendorPayable, partnerPayout: pricing.deliveryPartnerPayout, platformNetRevenue: pricing.deliveryFee + pricing.platformFee + vendorCommission - pricing.deliveryPartnerPayout, verificationCode: String(Math.floor(1000 + Math.random() * 9000)),
+          reservationIds: reserved.reservations.map((r) => r.reservationId),
+        },
+      });
+    } catch (e) {
+      // The stock hold succeeded but the order it was for could not be
+      // created — give the stock back now rather than leaving it stuck
+      // until the expiry sweep catches it minutes from now.
+      await releaseReservations(reserved.reservations.map((r) => r.reservationId));
+      throw e;
+    }
+    await consumeReservations(reserved.reservations.map((r) => r.reservationId), order._id);
+
     await AuditLog.create({ actorId: req.user!._id, actorRole: req.user!.role, action: "service_order.create", entityType: service, entityId: String(order._id), after: { reference, total } });
     res.json(ok({ order: serviceOrderDTO(order.toObject()) }, `${service} order placed`));
   } catch (e) {
