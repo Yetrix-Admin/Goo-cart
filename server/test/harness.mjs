@@ -6,6 +6,7 @@
 // the actual HTTP layer and the actual database driver.
 
 import http from "node:http";
+import crypto from "node:crypto";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 
 let replSet;
@@ -21,7 +22,13 @@ export async function startTestServer() {
   // Prevents server/src/index.ts from also calling httpServer.listen() on the
   // configured PORT — we bind our own ephemeral port below instead.
   process.env.VERCEL = "1";
-  process.env.RESEND_API_KEY = ""; // force the console-fallback email path, never a real send
+  // Gmail credentials are deliberately never set in the test environment, so
+  // email.ts's configured() check fails closed and every test run hits the
+  // safe console-fallback path — no test ever sends a real email.
+  delete process.env.GMAIL_USER;
+  delete process.env.GMAIL_CLIENT_ID;
+  delete process.env.GMAIL_CLIENT_SECRET;
+  delete process.env.GMAIL_REFRESH_TOKEN;
 
   const [{ default: app }, { connectDb }] = await Promise.all([import("../dist/index.js"), import("../dist/lib/db.js")]);
   // VERCEL=1 makes index.ts treat this as serverless, which skips its own
@@ -67,6 +74,23 @@ export async function apiPost(path, body, token) {
 export async function apiGet(path, token) {
   const res = await fetch(`${baseUrl}${path}`, { headers: token ? { authorization: `Bearer ${token}` } : {} });
   return json(res);
+}
+
+/**
+ * Requests a real OTP through the real route, then overrides its hash to a
+ * known value — the plaintext code is never available to a caller (only its
+ * hash is stored, matching production), so this drives verification through
+ * the exact same document/hash comparison the server itself performs.
+ */
+export async function knownOtpCode(identifier, purpose, token) {
+  const req = await apiPost("/api/v1/auth/otp/request", { identifier, purpose }, token);
+  if (req.status !== 200) throw new Error(`otp/request failed: ${JSON.stringify(req.body)}`);
+
+  const { Otp } = await import("../dist/models.js");
+  const code = "123456";
+  const codeHash = crypto.createHash("sha256").update(code).digest("hex");
+  await Otp.updateOne({ identifier, purpose, consumedAt: null }, { $set: { codeHash } }, { sort: { createdAt: -1 } });
+  return code;
 }
 
 let signupCounter = 0;

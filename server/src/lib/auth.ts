@@ -2,11 +2,15 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { Request, Response, NextFunction } from "express";
 import { Otp, Session, User, type UserDoc } from "../models.js";
-import { otpEmail, sendEmail } from "./email.js";
+import { sendOtpEmail, sendPasswordResetEmail } from "./email.js";
+import { logOtpEvent } from "./otpLog.js";
 
 const SESSION_TTL_DAYS = 30;
 const OTP_TTL_MINUTES = 5;
 const OTP_MAX_ATTEMPTS = 5;
+const OTP_RESEND_COOLDOWN_SECONDS = 60;
+const OTP_MAX_PER_WINDOW = 5;
+const OTP_WINDOW_MINUTES = 10;
 
 const ADMIN_ROLES = ["SUPER_ADMIN", "OPERATIONS_ADMIN", "FINANCE_ADMIN", "SUPPORT_ADMIN", "MARKETING_ADMIN", "CITY_ADMIN"];
 
@@ -92,6 +96,11 @@ export async function createSession(userId: unknown, meta: { ip?: string; userAg
   return token;
 }
 
+/** Revokes every active session for a user — used after a password reset, so a session an attacker already held is cut off immediately. */
+export async function revokeAllSessions(userId: unknown): Promise<void> {
+  await Session.updateMany({ userId, revokedAt: null }, { $set: { revokedAt: new Date() } });
+}
+
 export async function revokeSession(token: string): Promise<void> {
   await Session.updateOne({ tokenHash: sha256(token), revokedAt: null }, { $set: { revokedAt: new Date() } });
 }
@@ -118,11 +127,30 @@ export async function userFromToken(token: string): Promise<UserDoc | null> {
 
 // --- OTP ------------------------------------------------------------------
 
-export type OtpIssueResult = { delivered: boolean; reason?: string };
+export type OtpIssueResult =
+  | { ok: true; delivered: boolean; reason?: string }
+  | { ok: false; code: "COOLDOWN" | "RATE_LIMITED"; message: string };
+
+// Never printed unless this is explicitly not a production process — a code
+// logged to stdout in production is a code an attacker with log access can
+// use, and most hosts (this one included) treat NODE_ENV=production as the
+// default in a deployed environment.
+const isProduction = () => process.env.NODE_ENV === "production";
 
 export async function issueOtp(identifier: string, purpose: string): Promise<OtpIssueResult> {
-  const recent = await Otp.countDocuments({ identifier, purpose, createdAt: { $gt: new Date(Date.now() - 10 * 60_000) } });
-  if (recent >= 5) throw new Error("Too many codes requested. Try again later.");
+  logOtpEvent("EMAIL_OTP_REQUESTED", { identifier, purpose });
+
+  const last: any = await Otp.findOne({ identifier, purpose }).sort({ createdAt: -1 }).lean();
+  if (last && Date.now() - new Date(last.createdAt).getTime() < OTP_RESEND_COOLDOWN_SECONDS * 1000) {
+    logOtpEvent("EMAIL_OTP_FAILED", { identifier, purpose, reason: "COOLDOWN" });
+    return { ok: false, code: "COOLDOWN", message: `Please wait ${OTP_RESEND_COOLDOWN_SECONDS} seconds before requesting another code.` };
+  }
+
+  const recent = await Otp.countDocuments({ identifier, purpose, createdAt: { $gt: new Date(Date.now() - OTP_WINDOW_MINUTES * 60_000) } });
+  if (recent >= OTP_MAX_PER_WINDOW) {
+    logOtpEvent("EMAIL_OTP_FAILED", { identifier, purpose, reason: "RATE_LIMITED" });
+    return { ok: false, code: "RATE_LIMITED", message: "Too many codes requested. Try again later." };
+  }
 
   const code = String(Math.floor(100000 + Math.random() * 900000));
   await Otp.create({
@@ -134,27 +162,39 @@ export async function issueOtp(identifier: string, purpose: string): Promise<Otp
   // Phone delivery has no provider yet; only email codes actually go out.
   const isEmail = identifier.includes("@");
   if (!isEmail) {
-    console.log(`[DEV OTP — no SMS provider] ${identifier} -> ${code}`);
-    return { delivered: false, reason: "SMS delivery is not configured yet" };
+    if (!isProduction()) console.log(`[DEV OTP — no SMS provider] ${identifier} -> ${code}`);
+    return { ok: true, delivered: false, reason: "SMS delivery is not configured yet" };
   }
 
-  const { subject, html, text } = otpEmail(code);
-  const result = await sendEmail(identifier, subject, html, text);
-  if (!result.delivered) console.log(`[DEV OTP — email not delivered] ${identifier} -> ${code}`);
-  return result;
+  const result = purpose === "PASSWORD_RESET" ? await sendPasswordResetEmail(identifier, code) : await sendOtpEmail(identifier, code);
+  if (result.delivered) {
+    logOtpEvent("EMAIL_OTP_SENT", { identifier, purpose });
+  } else {
+    logOtpEvent("EMAIL_SEND_FAILED", { identifier, purpose, reason: result.reason });
+    if (!isProduction()) console.log(`[DEV OTP — email not delivered] ${identifier} -> ${code}`);
+  }
+  return { ok: true, delivered: result.delivered, reason: result.reason };
 }
 
 export async function consumeOtp(identifier: string, purpose: string, code: string): Promise<boolean> {
   const doc = await Otp.findOne({ identifier, purpose, consumedAt: null }).sort({ createdAt: -1 });
-  if (!doc) return false;
-  if (doc.attempts >= OTP_MAX_ATTEMPTS || doc.expiresAt.getTime() < Date.now()) return false;
+  if (!doc) {
+    logOtpEvent("EMAIL_OTP_FAILED", { identifier, purpose, reason: "NOT_FOUND" });
+    return false;
+  }
+  if (doc.attempts >= OTP_MAX_ATTEMPTS || doc.expiresAt.getTime() < Date.now()) {
+    logOtpEvent("EMAIL_OTP_EXPIRED", { identifier, purpose });
+    return false;
+  }
   if (doc.codeHash !== sha256(code)) {
     doc.attempts += 1;
     await doc.save();
+    logOtpEvent("EMAIL_OTP_FAILED", { identifier, purpose, reason: "INVALID_CODE" });
     return false;
   }
   doc.consumedAt = new Date();
   await doc.save();
+  logOtpEvent("EMAIL_OTP_VERIFIED", { identifier, purpose });
   return true;
 }
 

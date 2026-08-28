@@ -12,7 +12,7 @@ import { unassignPartner } from "../lib/delivery.js";
 import { getPricingSettings, updatePricingSettings } from "../lib/pricingSettings.js";
 import { createFoodItem, updateFoodItem, MenuItemError } from "../lib/menuItems.js";
 import { EMAIL_RE, PHONE_RE } from "../lib/http.js";
-import { sendEmail } from "../lib/email.js";
+import { sendWelcomeEmail } from "../lib/email.js";
 
 export const adminRouter = Router();
 adminRouter.use(requireRole(canAdmin, "Admin access required"));
@@ -210,12 +210,7 @@ adminRouter.post("/restaurants", async (req: AuthedRequest, res) => {
     }
 
     await audit(req, "vendor.create", "restaurant", String(restaurant._id), null, { name, ownerId: String(owner._id), ownerEmail });
-    void sendEmail(
-      ownerEmail,
-      `Your ${name} Goocart Vendor account is ready`,
-      `<p>Hello ${ownerName},</p><p>Your Goocart Vendor account for <strong>${name}</strong> is ready. Sign in with ${ownerEmail} using the password created by your administrator, or request an email OTP in the Vendor app.</p>`,
-      `Hello ${ownerName}. Your Goocart Vendor account for ${name} is ready. Sign in with ${ownerEmail} using the password created by your administrator, or request an email OTP in the Vendor app.`,
-    );
+    void sendWelcomeEmail(ownerEmail, ownerName, `Your Goocart Vendor account for <strong>${name}</strong> is ready. Sign in with ${ownerEmail} using the password created by your administrator, or request an email OTP in the Vendor app.`);
     res.json(ok({ restaurant: toRestaurantDTO(restaurant.toObject()), owner: { id: String(owner._id), name: ownerName, email: ownerEmail } }, "Vendor and owner login created"));
   } catch (e) {
     res.status(500).json(fail("VENDOR_CREATE_FAILED", e instanceof Error ? e.message : "Could not create vendor"));
@@ -400,7 +395,7 @@ adminRouter.post("/restaurants/:id/users", async (req: AuthedRequest, res) => {
     }
 
     await audit(req, "vendor_user.create", "user", String(user._id), null, { restaurantId: String(restaurant._id), role, permissions });
-    void sendEmail(email, "Your Goocart Vendor login is ready", `<p>Hello ${name},</p><p>Your Vendor app login is ready. Use <strong>${email}</strong> with the password created by your administrator, or request an email OTP.</p>`, `Hello ${name}. Your Vendor app login is ready. Use ${email} with the password created by your administrator, or request an email OTP.`);
+    void sendWelcomeEmail(email, name, `Your Vendor app login is ready. Use <strong>${email}</strong> with the password created by your administrator, or request an email OTP.`);
     res.json(ok({ user: { id: String(user._id), name, email, role, permissions } }, "Vendor user created"));
   } catch (e) {
     res.status(500).json(fail("VENDOR_USER_CREATE_FAILED", e instanceof Error ? e.message : "Could not create vendor user"));
@@ -540,7 +535,7 @@ adminRouter.post("/partners", async (req: AuthedRequest, res) => {
     });
 
     await audit(req, "partner.create", "user", String(partner._id), null, { name, email });
-    void sendEmail(email, "Your Goocart Partner login is ready", `<p>Hello ${name},</p><p>Your Goocart Partner login is ready. Use <strong>${email}</strong> with the password created by your administrator, or request an email OTP. You can go online after admin approval.</p>`, `Hello ${name}. Your Goocart Partner login is ready. Use ${email} with the password created by your administrator, or request an email OTP. You can go online after admin approval.`);
+    void sendWelcomeEmail(email, name, `Your Goocart Partner login is ready. Use <strong>${email}</strong> with the password created by your administrator, or request an email OTP. You can go online after admin approval.`);
     res.json(ok({ partner: partnerDTO(partner.toObject()) }, "Delivery partner created — pending approval"));
   } catch (e) {
     res.status(500).json(fail("PARTNER_CREATE_FAILED", e instanceof Error ? e.message : "Could not create delivery partner"));

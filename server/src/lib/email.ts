@@ -96,27 +96,55 @@ export async function sendEmail(to: string, subject: string, html: string, text:
   }
 }
 
-export function otpEmail(code: string): { subject: string; html: string; text: string } {
+// A single branded shell every Goocart email is built from, so the look
+// stays consistent without duplicating the same table/style boilerplate at
+// every call site.
+function brandedEmail(heading: string, bodyHtml: string, bodyText: string): { html: string; text: string } {
   return {
-    subject: `${code} is your Goocart verification code`,
-    text: `Your Goocart verification code is ${code}. It expires in 5 minutes. If you did not request it, ignore this email.`,
+    text: `Goocart\n${bodyText}\n\nIf you didn't request this, you can safely ignore this email.`,
     html: `<!doctype html>
 <html>
   <body style="margin:0;padding:24px;background:#FAFAFA;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#27272A">
     <table role="presentation" style="max-width:440px;margin:0 auto;background:#FFFFFF;border-radius:16px;padding:32px">
       <tr><td>
         <p style="margin:0 0 4px;font-size:12px;font-weight:800;letter-spacing:1.5px;color:#FF6B35">GOOCART</p>
-        <h1 style="margin:0 0 16px;font-size:22px;font-weight:600">Verify it's you</h1>
-        <p style="margin:0 0 24px;font-size:14px;line-height:22px;color:#71717A">
-          Enter this code to continue. It expires in 5 minutes.
+        <h1 style="margin:0 0 16px;font-size:22px;font-weight:600">${heading}</h1>
+        ${bodyHtml}
+        <p style="margin:24px 0 0;font-size:12px;line-height:19px;color:#A1A1AA">
+          If you didn't request this, you can safely ignore this email.
         </p>
-        <p style="margin:0 0 24px;font-size:34px;font-weight:800;letter-spacing:10px;text-align:center;padding:18px;background:#FFF1EB;border-radius:12px">${code}</p>
-        <p style="margin:0;font-size:12px;line-height:19px;color:#A1A1AA">
-          If you didn't request this, you can safely ignore this email. Never share this code with anyone.
-        </p>
+        <p style="margin:20px 0 0;font-size:11px;color:#D4D4D8;border-top:1px solid #F4F4F5;padding-top:16px">GOOCART — Everything Local, Delivered.</p>
       </td></tr>
     </table>
   </body>
 </html>`,
   };
+}
+
+function otpEmail(code: string, heading: string, intro: string): { subject: string; html: string; text: string } {
+  const bodyHtml = `
+        <p style="margin:0 0 24px;font-size:14px;line-height:22px;color:#71717A">${intro} It expires in 5 minutes.</p>
+        <p style="margin:0 0 24px;font-size:34px;font-weight:800;letter-spacing:10px;text-align:center;padding:18px;background:#FFF1EB;border-radius:12px">${code}</p>
+        <p style="margin:0;font-size:12px;line-height:19px;color:#A1A1AA">Never share this code with anyone — Goocart staff will never ask for it.</p>`;
+  const { html, text } = brandedEmail(heading, bodyHtml, `${intro} It expires in 5 minutes.\n\nYour code: ${code}\n\nNever share this code with anyone.`);
+  return { subject: `${code} is your Goocart verification code`, html, text };
+}
+
+/** Sends a 6-digit sign-in/sign-up code. */
+export async function sendOtpEmail(to: string, code: string): Promise<EmailResult> {
+  const { subject, html, text } = otpEmail(code, "Verify it's you", "Enter this code to continue.");
+  return sendEmail(to, subject, html, text);
+}
+
+/** Sends a 6-digit password-reset code — same mechanism as sendOtpEmail, distinct copy so it reads as a security-relevant action, not a routine login. */
+export async function sendPasswordResetEmail(to: string, code: string): Promise<EmailResult> {
+  const { subject, html, text } = otpEmail(code, "Reset your password", "Use this code to reset your Goocart password.");
+  return sendEmail(to, subject, html, text);
+}
+
+/** Sends the account-created notice for an admin-provisioned vendor/partner/staff login. */
+export async function sendWelcomeEmail(to: string, name: string, message: string): Promise<EmailResult> {
+  const bodyHtml = `<p style="margin:0 0 24px;font-size:14px;line-height:22px;color:#3F3F46">Hello ${name},</p><p style="margin:0 0 24px;font-size:14px;line-height:22px;color:#3F3F46">${message}</p>`;
+  const { html, text } = brandedEmail("Your account is ready", bodyHtml, `Hello ${name}.\n\n${message}`);
+  return sendEmail(to, "Your Goocart account is ready", html, text);
 }

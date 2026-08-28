@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import rateLimit from "express-rate-limit";
 import { User } from "../models.js";
 import {
   consumeOtp,
@@ -7,6 +8,7 @@ import {
   clearSessionCookie,
   hashPassword,
   issueOtp,
+  revokeAllSessions,
   revokeSession,
   sessionTokenFromRequest,
   setSessionCookie,
@@ -17,6 +19,14 @@ import {
 import { ok, fail, EMAIL_RE, PHONE_RE } from "../lib/http.js";
 
 export const authRouter = Router();
+
+// Real IP-based limits, on top of issueOtp()'s own per-identifier cooldown/
+// window — this stops one IP from hammering the endpoint across many
+// different email addresses to burn through Gmail's sending quota.
+const otpRequestLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false });
+const otpVerifyLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 40, standardHeaders: true, legacyHeaders: false });
+const passwordResetLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
+const authAttemptLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 30, standardHeaders: true, legacyHeaders: false });
 
 const publicUser = (u: any) => ({
   id: String(u._id),
@@ -80,10 +90,10 @@ async function handleLogin(req: Request, res: Response) {
   }
 }
 
-authRouter.post("/signup", handleSignup);
-authRouter.post("/login", handleLogin);
+authRouter.post("/signup", authAttemptLimiter, handleSignup);
+authRouter.post("/login", authAttemptLimiter, handleLogin);
 
-authRouter.post("/otp/request", async (req, res) => {
+authRouter.post("/otp/request", otpRequestLimiter, async (req, res) => {
   try {
     const identifier = String(req.body?.identifier ?? "").trim().toLowerCase();
     const purpose = String(req.body?.purpose ?? "");
@@ -98,6 +108,8 @@ authRouter.post("/otp/request", async (req, res) => {
     if (purpose === "LOGIN" && !existing) return res.status(404).json(fail("ACCOUNT_NOT_FOUND", "No account found — sign up instead"));
 
     const result = await issueOtp(identifier, purpose);
+    if (!result.ok) return res.status(429).json(fail(result.code, result.message));
+
     // Never claim delivery that did not happen. In development the code is in
     // the server log; the client shows that instead of a false success.
     res.json(
@@ -111,7 +123,7 @@ authRouter.post("/otp/request", async (req, res) => {
   }
 });
 
-authRouter.post("/otp/verify", async (req, res) => {
+authRouter.post("/otp/verify", otpVerifyLimiter, async (req, res) => {
   try {
     const identifier = String(req.body?.identifier ?? "").trim().toLowerCase();
     const purpose = String(req.body?.purpose ?? "");
@@ -148,6 +160,63 @@ authRouter.post("/otp/verify", async (req, res) => {
     res.json(ok({ user: publicUser(user), token }, "Signed in"));
   } catch (e) {
     res.status(500).json(fail("OTP_VERIFY_FAILED", e instanceof Error ? e.message : "Could not verify code"));
+  }
+});
+
+// --- Password reset (email OTP) --------------------------------------------
+// Deliberately its own purpose ("PASSWORD_RESET") and its own pair of
+// routes, distinct from /otp/request+/otp/verify — a reset code must never
+// be usable to sign in, and a login/signup code must never be usable to
+// change a password. Kept as separate purpose values inside the same
+// issueOtp()/consumeOtp() machinery rather than a parallel implementation.
+
+authRouter.post("/password/reset-request", passwordResetLimiter, async (req, res) => {
+  try {
+    const identifier = String(req.body?.identifier ?? "").trim().toLowerCase();
+    if (!EMAIL_RE.test(identifier) && !PHONE_RE.test(identifier)) {
+      return res.status(400).json(fail("INVALID_IDENTIFIER", "Enter a valid email or phone number"));
+    }
+
+    const field = EMAIL_RE.test(identifier) ? "email" : "phone";
+    const existing: any = await User.findOne({ [field]: identifier }).lean();
+    // Same response whether or not the account exists (and whether it's
+    // active) so this endpoint can't be used to enumerate registered
+    // accounts or find out which ones are disabled.
+    if (existing && existing.status === "ACTIVE") {
+      const result = await issueOtp(identifier, "PASSWORD_RESET");
+      if (!result.ok) return res.status(429).json(fail(result.code, result.message));
+    }
+    res.json(ok({ identifier }, "If that account exists, a reset code has been sent."));
+  } catch (e) {
+    res.status(500).json(fail("PASSWORD_RESET_REQUEST_FAILED", e instanceof Error ? e.message : "Could not process this request"));
+  }
+});
+
+authRouter.post("/password/reset-confirm", passwordResetLimiter, async (req, res) => {
+  try {
+    const identifier = String(req.body?.identifier ?? "").trim().toLowerCase();
+    const code = String(req.body?.code ?? "").trim();
+    const newPassword = String(req.body?.newPassword ?? "");
+
+    if (!/^[0-9]{6}$/.test(code)) return res.status(400).json(fail("INVALID_CODE", "Enter the 6-digit code"));
+    if (newPassword.length < 8) return res.status(400).json(fail("WEAK_PASSWORD", "Password must be at least 8 characters"));
+    if (!(await consumeOtp(identifier, "PASSWORD_RESET", code))) return res.status(401).json(fail("INVALID_OTP", "That code is incorrect or has expired"));
+
+    const field = EMAIL_RE.test(identifier) ? "email" : "phone";
+    const user: any = await User.findOne({ [field]: identifier });
+    if (!user) return res.status(404).json(fail("ACCOUNT_NOT_FOUND", "No account found for this identifier"));
+    if (user.status !== "ACTIVE") return res.status(403).json(fail("ACCOUNT_DISABLED", "This account is not active"));
+
+    user.passwordHash = await hashPassword(newPassword);
+    await user.save();
+    // A stolen session should not survive its owner resetting the password.
+    await revokeAllSessions(user._id);
+
+    const token = await createSession(user._id, { ip: req.ip, userAgent: req.header("user-agent") });
+    setSessionCookie(res, token);
+    res.json(ok({ user: publicUser(user), token }, "Password updated"));
+  } catch (e) {
+    res.status(500).json(fail("PASSWORD_RESET_FAILED", e instanceof Error ? e.message : "Could not reset your password"));
   }
 });
 
