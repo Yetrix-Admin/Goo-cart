@@ -12,6 +12,8 @@ export async function getPricingSettings(): Promise<PricingSettings> {
     taxRatePercent: doc.taxRatePercent,
     restaurantDiscountThreshold: doc.restaurantDiscountThreshold,
     restaurantDiscountAmount: doc.restaurantDiscountAmount,
+    vendorCommissionPercent: doc.vendorCommissionPercent ?? DEFAULT_PRICING_SETTINGS.vendorCommissionPercent,
+    deliveryPartnerPayout: doc.deliveryPartnerPayout ?? DEFAULT_PRICING_SETTINGS.deliveryPartnerPayout,
   };
 }
 

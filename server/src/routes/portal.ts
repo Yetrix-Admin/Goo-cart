@@ -165,7 +165,7 @@ async function buildSnapshot(user: any) {
       updated_at: o.updatedAt,
     })),
     services: SERVICES.map((s) => ({ service: s, enabled: (services as any[]).find((c) => c._id === s)?.enabled === false ? 0 : 1 })),
-    pricing: (pricing as any[]).map((p) => ({ service: p._id, base_fare: p.baseFare, per_km: p.perKm, platform_fee: p.platformFee })),
+    pricing: (pricing as any[]).map((p) => ({ service: p._id, base_fare: p.baseFare, per_km: p.perKm, platform_fee: p.platformFee, partner_payout_percent: p.partnerPayoutPercent ?? 80 })),
     settings: settingMap,
     users: (users as any[]).map((u) => ({ id: String(u._id), email: u.email, name: u.name, role: u.role, status: u.status, created_at: u.createdAt })),
     auditLogs: audits as unknown[],
@@ -336,6 +336,8 @@ portalRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
 
         const distance = Math.max(1, Math.min(30, Number(body.distance) || 4.2));
         const total = Math.round(rule.baseFare + rule.perKm * distance + rule.platformFee);
+        const fare = Math.round(rule.baseFare + rule.perKm * distance);
+        const partnerPayout = Math.round(fare * Number(rule.partnerPayoutPercent ?? 80) / 100);
         const seq = await nextSequence(service === "Bike Taxi" ? "rideNumber" : "parcelNumber");
         const reference = `GOO-${service === "Bike Taxi" ? "RIDE" : "PCL"}-${new Date().getFullYear()}-${String(seq).padStart(6, "0")}`;
 
@@ -351,6 +353,10 @@ portalRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
             pickup,
             drop,
             distance,
+            fare,
+            platformFee: rule.platformFee,
+            partnerPayout,
+            platformNetRevenue: total - partnerPayout,
             verificationCode: String(Math.floor(1000 + Math.random() * 9000)),
             ...(service === "Parcel" ? { packageType: String(body.packageType ?? "Small Package") } : {}),
           },

@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { AuditLog, Coupon, FoodItem, Order, Product, Restaurant, Session, User } from "../models.js";
-import { requireRole, canAdmin, type AuthedRequest } from "../lib/auth.js";
+import { AuditLog, Coupon, FoodItem, Order, Product, Restaurant, ServiceOrder, Session, User } from "../models.js";
+import { requireRole, canAdmin, hashPassword, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
 import { toFoodItemDTO, toRestaurantDTO } from "./catalog.js";
 import { toOrderDTO } from "./orders.js";
@@ -12,6 +12,7 @@ import { unassignPartner } from "../lib/delivery.js";
 import { getPricingSettings, updatePricingSettings } from "../lib/pricingSettings.js";
 import { createFoodItem, updateFoodItem, MenuItemError } from "../lib/menuItems.js";
 import { EMAIL_RE, PHONE_RE } from "../lib/http.js";
+import { sendEmail } from "../lib/email.js";
 
 export const adminRouter = Router();
 adminRouter.use(requireRole(canAdmin, "Admin access required"));
@@ -155,8 +156,17 @@ adminRouter.post("/restaurants", async (req: AuthedRequest, res) => {
   try {
     const body = req.body ?? {};
     const name = String(body.name ?? "").trim();
+    const ownerName = String(body.ownerName ?? "").trim();
+    const ownerEmail = String(body.ownerEmail ?? "").trim().toLowerCase();
+    const ownerPhone = body.ownerPhone ? String(body.ownerPhone).trim() : undefined;
+    const initialPassword = String(body.initialPassword ?? "");
     if (name.length < 2) return res.status(400).json(fail("INVALID_NAME", "Enter a business name."));
     if (!isValidCoordinate(body.latitude, body.longitude)) return res.status(400).json(fail("INVALID_LOCATION", "A valid latitude and longitude are required."));
+    if (ownerName.length < 2) return res.status(400).json(fail("INVALID_OWNER_NAME", "Enter the owner's full name."));
+    if (!EMAIL_RE.test(ownerEmail)) return res.status(400).json(fail("INVALID_OWNER_EMAIL", "Enter a valid owner email."));
+    if (ownerPhone && !PHONE_RE.test(ownerPhone)) return res.status(400).json(fail("INVALID_OWNER_PHONE", "Enter a valid owner phone number."));
+    if (initialPassword.length < 8) return res.status(400).json(fail("WEAK_PASSWORD", "The initial password must be at least 8 characters."));
+    if (await User.exists({ email: ownerEmail })) return res.status(409).json(fail("EMAIL_TAKEN", "An account with this owner email already exists."));
 
     const slugBase = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "vendor";
     let slug = slugBase;
@@ -180,8 +190,33 @@ adminRouter.post("/restaurants", async (req: AuthedRequest, res) => {
       status: "ACTIVE",
     });
 
-    await audit(req, "vendor.create", "restaurant", String(restaurant._id), null, { name });
-    res.json(ok({ restaurant: toRestaurantDTO(restaurant.toObject()) }, "Vendor created"));
+    let owner;
+    try {
+      owner = await User.create({
+        email: ownerEmail,
+        ...(ownerPhone ? { phone: ownerPhone } : {}),
+        name: ownerName,
+        passwordHash: await hashPassword(initialPassword),
+        role: "VENDOR_OWNER",
+        status: "ACTIVE",
+        vendorId: restaurant._id,
+        vendorPermissions: [...VENDOR_PERMISSIONS],
+      });
+      restaurant.ownerUserId = owner._id as unknown as typeof restaurant.ownerUserId;
+      await restaurant.save();
+    } catch (error) {
+      await Restaurant.deleteOne({ _id: restaurant._id });
+      throw error;
+    }
+
+    await audit(req, "vendor.create", "restaurant", String(restaurant._id), null, { name, ownerId: String(owner._id), ownerEmail });
+    void sendEmail(
+      ownerEmail,
+      `Your ${name} Goocart Vendor account is ready`,
+      `<p>Hello ${ownerName},</p><p>Your Goocart Vendor account for <strong>${name}</strong> is ready. Sign in with ${ownerEmail} using the password created by your administrator, or request an email OTP in the Vendor app.</p>`,
+      `Hello ${ownerName}. Your Goocart Vendor account for ${name} is ready. Sign in with ${ownerEmail} using the password created by your administrator, or request an email OTP in the Vendor app.`,
+    );
+    res.json(ok({ restaurant: toRestaurantDTO(restaurant.toObject()), owner: { id: String(owner._id), name: ownerName, email: ownerEmail } }, "Vendor and owner login created"));
   } catch (e) {
     res.status(500).json(fail("VENDOR_CREATE_FAILED", e instanceof Error ? e.message : "Could not create vendor"));
   }
@@ -337,21 +372,21 @@ adminRouter.post("/restaurants/:id/users", async (req: AuthedRequest, res) => {
     const phone = body.phone ? String(body.phone).trim() : undefined;
     const name = String(body.name ?? "").trim();
     const role = String(body.role ?? "VENDOR_STAFF");
+    const initialPassword = String(body.initialPassword ?? "");
     const permissions = Array.isArray(body.permissions) ? body.permissions.filter((p: unknown) => VENDOR_PERMISSIONS.includes(p as any)) : [];
 
     if (!EMAIL_RE.test(email)) return res.status(400).json(fail("INVALID_EMAIL", "Enter a valid email address."));
     if (phone && !PHONE_RE.test(phone)) return res.status(400).json(fail("INVALID_PHONE", "Enter a valid phone number."));
     if (name.length < 2) return res.status(400).json(fail("INVALID_NAME", "Enter a full name."));
     if (!VENDOR_ROLES.includes(role)) return res.status(400).json(fail("INVALID_ROLE", "Role must be VENDOR_OWNER, VENDOR_MANAGER or VENDOR_STAFF."));
+    if (initialPassword.length < 8) return res.status(400).json(fail("WEAK_PASSWORD", "The initial password must be at least 8 characters."));
     if (await User.exists({ email })) return res.status(409).json(fail("EMAIL_TAKEN", "An account with this email already exists."));
 
-    // No password is set here — a vendor user signs into the Vendor App with
-    // an OTP sent to this email or phone, the same mechanism the Customer
-    // App already uses. There is nothing to "hand over" insecurely.
     const user = await User.create({
       email,
       ...(phone ? { phone } : {}),
       name,
+      passwordHash: await hashPassword(initialPassword),
       role,
       status: "ACTIVE",
       vendorId: restaurant._id,
@@ -365,6 +400,7 @@ adminRouter.post("/restaurants/:id/users", async (req: AuthedRequest, res) => {
     }
 
     await audit(req, "vendor_user.create", "user", String(user._id), null, { restaurantId: String(restaurant._id), role, permissions });
+    void sendEmail(email, "Your Goocart Vendor login is ready", `<p>Hello ${name},</p><p>Your Vendor app login is ready. Use <strong>${email}</strong> with the password created by your administrator, or request an email OTP.</p>`, `Hello ${name}. Your Vendor app login is ready. Use ${email} with the password created by your administrator, or request an email OTP.`);
     res.json(ok({ user: { id: String(user._id), name, email, role, permissions } }, "Vendor user created"));
   } catch (e) {
     res.status(500).json(fail("VENDOR_USER_CREATE_FAILED", e instanceof Error ? e.message : "Could not create vendor user"));
@@ -395,14 +431,21 @@ adminRouter.patch("/restaurants/:id/users/:userId", async (req: AuthedRequest, r
 
 adminRouter.post("/restaurants/:id/users/:userId/reset-access", async (req: AuthedRequest, res) => {
   try {
-    const user = await User.findOne({ _id: req.params.userId, vendorId: req.params.id }, { _id: 1 }).lean();
+    const user = await User.findOne({ _id: req.params.userId, vendorId: req.params.id });
     if (!user) return res.status(404).json(fail("VENDOR_USER_NOT_FOUND", "Vendor user not found"));
+
+    const password = String(req.body?.password ?? "");
+    if (password && password.length < 8) return res.status(400).json(fail("WEAK_PASSWORD", "The new password must be at least 8 characters."));
+    if (password) {
+      user.passwordHash = await hashPassword(password);
+      await user.save();
+    }
 
     // Every device this login is currently signed into is forced out; they
     // sign back in with a fresh OTP.
     const result = await Session.updateMany({ userId: user._id, revokedAt: null }, { $set: { revokedAt: new Date() } });
     await audit(req, "vendor_user.reset_access", "user", req.params.userId, {}, { sessionsRevoked: result.modifiedCount });
-    res.json(ok({ sessionsRevoked: result.modifiedCount }, "Login access reset — they'll need to sign in again"));
+    res.json(ok({ sessionsRevoked: result.modifiedCount, passwordChanged: Boolean(password) }, password ? "Password changed and existing sessions signed out" : "Login access reset — they'll need to sign in again"));
   } catch (e) {
     res.status(500).json(fail("RESET_FAILED", e instanceof Error ? e.message : "Could not reset login access"));
   }
@@ -470,16 +513,19 @@ adminRouter.post("/partners", async (req: AuthedRequest, res) => {
     const email = String(body.email ?? "").trim().toLowerCase();
     const phone = body.phone ? String(body.phone).trim() : undefined;
     const name = String(body.name ?? "").trim();
+    const initialPassword = String(body.initialPassword ?? "");
 
     if (!EMAIL_RE.test(email)) return res.status(400).json(fail("INVALID_EMAIL", "Enter a valid email address."));
     if (phone && !PHONE_RE.test(phone)) return res.status(400).json(fail("INVALID_PHONE", "Enter a valid phone number."));
     if (name.length < 2) return res.status(400).json(fail("INVALID_NAME", "Enter a full name."));
+    if (initialPassword.length < 8) return res.status(400).json(fail("WEAK_PASSWORD", "The initial password must be at least 8 characters."));
     if (await User.exists({ email })) return res.status(409).json(fail("EMAIL_TAKEN", "An account with this email already exists."));
 
     const partner = await User.create({
       email,
       ...(phone ? { phone } : {}),
       name,
+      passwordHash: await hashPassword(initialPassword),
       role: "DELIVERY_PARTNER",
       status: "ACTIVE",
       vehicleType: body.vehicleType ?? null,
@@ -488,12 +534,13 @@ adminRouter.post("/partners", async (req: AuthedRequest, res) => {
       rcNumber: body.rcNumber ?? null,
       bankDetails: body.bankDetails ?? null,
       photoUrl: body.photoUrl ?? null,
-      // Admin approval is required before a newly-created partner can go
-      // online (spec section 23-24) — they don't start eligible for work.
-      partnerApprovalStatus: "PENDING",
+      // Admin may complete verification during creation, or leave the
+      // account pending for a separate document-check step.
+      partnerApprovalStatus: body.approveNow === true ? "APPROVED" : "PENDING",
     });
 
     await audit(req, "partner.create", "user", String(partner._id), null, { name, email });
+    void sendEmail(email, "Your Goocart Partner login is ready", `<p>Hello ${name},</p><p>Your Goocart Partner login is ready. Use <strong>${email}</strong> with the password created by your administrator, or request an email OTP. You can go online after admin approval.</p>`, `Hello ${name}. Your Goocart Partner login is ready. Use ${email} with the password created by your administrator, or request an email OTP. You can go online after admin approval.`);
     res.json(ok({ partner: partnerDTO(partner.toObject()) }, "Delivery partner created — pending approval"));
   } catch (e) {
     res.status(500).json(fail("PARTNER_CREATE_FAILED", e instanceof Error ? e.message : "Could not create delivery partner"));
@@ -688,6 +735,90 @@ adminRouter.get("/audit-logs", async (req, res) => {
 });
 
 // --- Platform pricing & discounts ("admin can set the discount thing and
+// --- Finance --------------------------------------------------------------
+// Finance is derived from immutable order bill snapshots. Older food orders
+// created before settlement snapshots existed are clearly counted as legacy
+// estimates instead of silently presenting guessed values as exact.
+
+adminRouter.get("/finance", async (_req, res) => {
+  try {
+    const [foodOrders, serviceOrders, currentPricing] = await Promise.all([
+      Order.find({}, { orderNumber: 1, restaurantId: 1, restaurantName: 1, status: 1, paymentStatus: 1, bill: 1, createdAt: 1 }).lean(),
+      ServiceOrder.find({}, { reference: 1, service: 1, vendorId: 1, vendorName: 1, status: 1, total: 1, details: 1, createdAt: 1 }).lean(),
+      getPricingSettings(),
+    ]);
+
+    const successful = new Set(["DELIVERED", "COMPLETED"]);
+    const cancelled = new Set(["VENDOR_REJECTED", "CANCELLED_BY_CUSTOMER", "CANCELLED_BY_ADMIN", "CANCELLED"]);
+    const rows: any[] = [];
+    let legacyEstimatedOrders = 0;
+
+    for (const order of foodOrders as any[]) {
+      const bill = order.bill ?? {};
+      const netFood = Math.max(0, Number(bill.itemTotal ?? 0) - Number(bill.restaurantDiscount ?? 0) - Number(bill.couponDiscount ?? 0));
+      const hasSnapshot = bill.vendorPayable !== undefined && bill.vendorCommission !== undefined && bill.deliveryPartnerPayout !== undefined;
+      if (!hasSnapshot) legacyEstimatedOrders += 1;
+      const vendorCommission = hasSnapshot ? Number(bill.vendorCommission ?? 0) : Math.round(netFood * currentPricing.vendorCommissionPercent / 100);
+      const vendorPayable = hasSnapshot ? Number(bill.vendorPayable ?? 0) : Math.max(0, netFood - vendorCommission);
+      const partnerPayout = hasSnapshot ? Number(bill.deliveryPartnerPayout ?? 0) : currentPricing.deliveryPartnerPayout;
+      const platformGross = Number(bill.platformFee ?? 0) + Number(bill.deliveryFee ?? 0) + vendorCommission;
+      rows.push({
+        id: String(order._id), reference: order.orderNumber, service: "Food", vendorId: String(order.restaurantId), vendorName: order.restaurantName,
+        status: order.status, total: Number(bill.total ?? 0), itemTotal: Number(bill.itemTotal ?? 0), discounts: Number(bill.restaurantDiscount ?? 0) + Number(bill.couponDiscount ?? 0),
+        taxes: Number(bill.taxes ?? 0), platformFees: Number(bill.platformFee ?? 0) + Number(bill.deliveryFee ?? 0), vendorCommission, vendorPayable,
+        partnerPayout, platformGross, platformNet: platformGross - partnerPayout, completed: successful.has(order.status), cancelled: cancelled.has(order.status), createdAt: order.createdAt,
+      });
+    }
+
+    for (const order of serviceOrders as any[]) {
+      const details = order.details ?? {};
+      const isCommerce = ["Grocery", "Vegetables", "Mart"].includes(order.service);
+      const subtotal = Number(details.subtotal ?? (isCommerce ? order.total : 0));
+      const platformFees = Number(details.fees ?? details.platformFee ?? (isCommerce ? Math.max(0, order.total - subtotal) : 0));
+      const partnerPayout = Number(details.partnerPayout ?? 0);
+      const vendorPayable = Number(details.vendorPayable ?? (isCommerce ? subtotal : 0));
+      rows.push({
+        id: String(order._id), reference: order.reference, service: order.service, vendorId: order.vendorId ? String(order.vendorId) : null, vendorName: order.vendorName,
+        status: order.status, total: Number(order.total ?? 0), itemTotal: subtotal, discounts: Number(details.discounts ?? 0), taxes: Number(details.taxes ?? 0),
+        platformFees, vendorCommission: Number(details.vendorCommission ?? 0), vendorPayable, partnerPayout,
+        platformGross: platformFees + Number(details.vendorCommission ?? 0), platformNet: platformFees + Number(details.vendorCommission ?? 0) - partnerPayout,
+        completed: successful.has(order.status), cancelled: cancelled.has(order.status), createdAt: order.createdAt,
+      });
+    }
+
+    const recognized = rows.filter((row) => row.completed);
+    const sum = (field: string) => Math.round(recognized.reduce((total, row) => total + Number(row[field] ?? 0), 0));
+    const byServiceMap = new Map<string, any>();
+    const vendorMap = new Map<string, any>();
+    for (const row of recognized) {
+      const service = byServiceMap.get(row.service) ?? { service: row.service, orders: 0, customerRevenue: 0, platformNetRevenue: 0, vendorPayable: 0, partnerPayout: 0 };
+      service.orders += 1; service.customerRevenue += row.total; service.platformNetRevenue += row.platformNet; service.vendorPayable += row.vendorPayable; service.partnerPayout += row.partnerPayout;
+      byServiceMap.set(row.service, service);
+      if (row.vendorId) {
+        const vendor = vendorMap.get(row.vendorId) ?? { vendorId: row.vendorId, vendorName: row.vendorName || "Vendor", orders: 0, grossFoodSales: 0, commission: 0, payable: 0 };
+        vendor.orders += 1; vendor.grossFoodSales += row.itemTotal; vendor.commission += row.vendorCommission; vendor.payable += row.vendorPayable;
+        vendorMap.set(row.vendorId, vendor);
+      }
+    }
+
+    res.json(ok({
+      summary: {
+        recognizedOrders: recognized.length,
+        pendingOrders: rows.filter((row) => !row.completed && !row.cancelled).length,
+        cancelledOrders: rows.filter((row) => row.cancelled).length,
+        customerRevenue: sum("total"), merchandiseValue: sum("itemTotal"), discounts: sum("discounts"), taxes: sum("taxes"),
+        platformGrossRevenue: sum("platformGross"), platformNetRevenue: sum("platformNet"), vendorPayable: sum("vendorPayable"), partnerPayable: sum("partnerPayout"),
+        legacyEstimatedOrders,
+      },
+      byService: [...byServiceMap.values()].sort((a, b) => b.customerRevenue - a.customerRevenue),
+      vendorSettlements: [...vendorMap.values()].sort((a, b) => b.payable - a.payable),
+      recent: rows.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 100),
+    }));
+  } catch (e) {
+    res.status(500).json(fail("FINANCE_UNAVAILABLE", e instanceof Error ? e.message : "Unable to calculate finance"));
+  }
+});
+
 // percentage things and everything should handle from admin only") --------
 
 adminRouter.get("/pricing-settings", async (_req, res) => {
@@ -702,11 +833,11 @@ adminRouter.patch("/pricing-settings", async (req: AuthedRequest, res) => {
   try {
     const body = req.body ?? {};
     const patch: Record<string, number> = {};
-    for (const field of ["deliveryFee", "platformFee", "taxRatePercent", "restaurantDiscountThreshold", "restaurantDiscountAmount"]) {
+    for (const field of ["deliveryFee", "platformFee", "taxRatePercent", "restaurantDiscountThreshold", "restaurantDiscountAmount", "vendorCommissionPercent", "deliveryPartnerPayout"]) {
       if (body[field] === undefined) continue;
       const value = Number(body[field]);
       if (!Number.isFinite(value) || value < 0) return res.status(400).json(fail("INVALID_VALUE", `${field} must be a non-negative number.`));
-      if (field === "taxRatePercent" && value > 100) return res.status(400).json(fail("INVALID_VALUE", "Tax rate cannot exceed 100%."));
+      if ((field === "taxRatePercent" || field === "vendorCommissionPercent") && value > 100) return res.status(400).json(fail("INVALID_VALUE", `${field} cannot exceed 100%.`));
       patch[field] = value;
     }
     const before = await getPricingSettings();

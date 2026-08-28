@@ -53,7 +53,7 @@ export default function HomeScreen() {
       router.push("/food");
       return;
     }
-    router.push({ pathname: "/search", params: { service } });
+    router.push({ pathname: "/service/[type]", params: { type: service } });
   };
 
   const greeting = getGreeting();

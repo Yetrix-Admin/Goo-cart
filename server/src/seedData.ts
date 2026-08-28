@@ -903,6 +903,21 @@ export const SEED_COUPONS = [
 // Bike Taxi and Parcel fares. Admin-editable from the portal; never hardcoded
 // in any client.
 export const SEED_PRICING = [
-  { service: "Bike Taxi", baseFare: 25, perKm: 8, platformFee: 4 },
-  { service: "Parcel", baseFare: 35, perKm: 10, platformFee: 5 },
+  { service: "Bike Taxi", baseFare: 25, perKm: 8, platformFee: 4, partnerPayoutPercent: 80 },
+  { service: "Parcel", baseFare: 35, perKm: 10, platformFee: 5, partnerPayoutPercent: 80 },
+];
+
+export const SEED_PRODUCTS = [
+  { service: "Grocery", name: "Full Cream Milk 1L", description: "Fresh pasteurised milk", price: 68, stock: 80, rating: 4.7, eta: "25–35 min" },
+  { service: "Grocery", name: "Premium Rice 5kg", description: "Everyday long-grain rice", price: 349, stock: 35, rating: 4.6, eta: "25–35 min" },
+  { service: "Grocery", name: "Sunflower Oil 1L", description: "Refined cooking oil", price: 145, stock: 50, rating: 4.5, eta: "25–35 min" },
+  { service: "Grocery", name: "Farm Eggs 12 pack", description: "Fresh graded eggs", price: 110, stock: 42, rating: 4.7, eta: "25–35 min" },
+  { service: "Vegetables", name: "Tomatoes 1kg", description: "Farm-fresh local tomatoes", price: 48, stock: 65, rating: 4.6, eta: "20–30 min" },
+  { service: "Vegetables", name: "Onions 1kg", description: "Fresh everyday onions", price: 42, stock: 70, rating: 4.5, eta: "20–30 min" },
+  { service: "Vegetables", name: "Potatoes 1kg", description: "Cleaned fresh potatoes", price: 38, stock: 60, rating: 4.5, eta: "20–30 min" },
+  { service: "Vegetables", name: "Green vegetables combo", description: "Seasonal leafy vegetable pack", price: 89, stock: 30, rating: 4.4, eta: "20–30 min" },
+  { service: "Mart", name: "Mineral Water 1L", description: "Packaged drinking water", price: 20, stock: 100, rating: 4.8, eta: "15–25 min" },
+  { service: "Mart", name: "Bread 400g", description: "Fresh sandwich bread", price: 45, stock: 45, rating: 4.5, eta: "15–25 min" },
+  { service: "Mart", name: "Chocolate Ice Cream 700ml", description: "Family pack", price: 210, stock: 25, rating: 4.7, eta: "15–25 min" },
+  { service: "Mart", name: "Laundry Detergent 1kg", description: "Machine and bucket wash", price: 185, stock: 34, rating: 4.4, eta: "15–25 min" },
 ];

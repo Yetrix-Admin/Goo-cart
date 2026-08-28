@@ -1,8 +1,8 @@
 import "dotenv/config";
 import mongoose from "mongoose";
 import { connectDb, dbName, disconnectDb } from "./lib/db.js";
-import { Coupon, FoodItem, PricingRule, Restaurant, Role, ServiceConfig } from "./models.js";
-import { SEED_RESTAURANTS, SEED_FOOD_ITEMS, SEED_COUPONS, SEED_ROLES, SEED_PRICING, SERVICES } from "./seedData.js";
+import { Coupon, FoodItem, PricingRule, Product, Restaurant, Role, ServiceConfig, User } from "./models.js";
+import { SEED_RESTAURANTS, SEED_FOOD_ITEMS, SEED_COUPONS, SEED_ROLES, SEED_PRICING, SEED_PRODUCTS, SERVICES } from "./seedData.js";
 
 const WIPE_FLAG = "--confirm-wipe";
 
@@ -77,9 +77,23 @@ async function seed(): Promise<void> {
   console.log(`food items     ${itemCount}`);
 
   for (const rule of SEED_PRICING) {
-    await PricingRule.findByIdAndUpdate(rule.service, { baseFare: rule.baseFare, perKm: rule.perKm, platformFee: rule.platformFee }, { upsert: true });
+    await PricingRule.findByIdAndUpdate(rule.service, { baseFare: rule.baseFare, perKm: rule.perKm, platformFee: rule.platformFee, partnerPayoutPercent: rule.partnerPayoutPercent }, { upsert: true });
   }
   console.log(`pricing rules  ${SEED_PRICING.length}`);
+
+  const platformStore = await User.findOneAndUpdate(
+    { email: "platform-store@goocart.local" },
+    { $set: { name: "Goocart Local Store", role: "VENDOR_OWNER", status: "ACTIVE" } },
+    { upsert: true, new: true },
+  );
+  for (const product of SEED_PRODUCTS) {
+    await Product.findOneAndUpdate(
+      { service: product.service, name: product.name, vendorId: platformStore!._id },
+      { $set: { ...product, vendorId: platformStore!._id, vendorName: platformStore!.name } },
+      { upsert: true },
+    );
+  }
+  console.log(`service items  ${SEED_PRODUCTS.length}`);
 
   for (const c of SEED_COUPONS) {
     await Coupon.findOneAndUpdate({ code: c.code }, { $set: c }, { upsert: true });
@@ -92,6 +106,7 @@ async function seed(): Promise<void> {
   console.log(`  food items   ${await FoodItem.countDocuments()}`);
   console.log(`  coupons      ${await Coupon.countDocuments()}`);
   console.log(`  open now     ${await Restaurant.countDocuments({ isOpen: true })}`);
+  console.log(`  service items ${await Product.countDocuments({ stock: { $gt: 0 } })}`);
 
   await disconnectDb();
   console.log("\nSeed complete.");

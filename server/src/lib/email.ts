@@ -11,8 +11,8 @@ export type EmailResult = { delivered: boolean; reason?: string };
 
 function configured(): { key: string; from: string } | null {
   const key = process.env.RESEND_API_KEY;
-  const from = process.env.RESEND_FROM_EMAIL;
-  return key && from ? { key, from } : null;
+  const from = process.env.RESEND_FROM_EMAIL || "Goocart <onboarding@resend.dev>";
+  return key ? { key, from } : null;
 }
 
 export async function sendEmail(to: string, subject: string, html: string, text: string): Promise<EmailResult> {

@@ -88,7 +88,7 @@ function Kpis({items}:{items:[string,string,string][]}){return <section classNam
 function OrdersTable({orders,act,busy}:{orders:Order[];act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){return <div className="ops-table"><div className="ops-row ops-head"><span>REFERENCE</span><span>DETAILS</span><span>STATUS</span><span>VALUE</span><span>ACTION</span></div>{orders.map((o)=><div className="ops-row" key={o.id}><b>{o.reference}</b><span>{o.vendor}<small>{o.service} • {orderSummary(o)}</small></span><Status value={o.status}/><strong>{money(o.total)}</strong><OrderAction order={o} act={act} busy={busy}/></div>)}{!orders.length&&<Empty title="No matching work" copy="New activity will appear here automatically."/>}</div>}
 function OrderAction({order,act,busy}:{order:Order;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean}){if(terminalStatuses.includes(order.status))return null;return <div className="row-actions"><button className="danger" disabled={busy} onClick={()=>void act({action:"order.transition",id:order.id,to:"CANCELLED_BY_ADMIN"})}>Cancel</button></div>}
 
-function Admin({state,act,busy,retry}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean;retry:()=>Promise<void>}){const [page,setPage]=useState("Dashboard");const orders=state.orders;const gmv=orders.reduce((s,x)=>s+x.total,0);const active=orders.filter((x)=>!terminalStatuses.includes(x.status));const rides=orders.filter((x)=>x.service==="Bike Taxi");const parcels=orders.filter((x)=>x.service==="Parcel");return <Shell page={page} setPage={setPage} state={state}>{page==="Dashboard"&&<><div className="overview"><span><small>Command center</small><h2>Operations at a glance.</h2></span><b>LIVE DATA</b></div><Kpis items={[[money(gmv),"Total GMV","All services"],[String(orders.length),"Total orders & jobs","Live"],[String(active.length),"Active operations","Now"],[String(state.services.filter((x)=>x.enabled).length),"Enabled services","of 6"]]}/><section className="panel"><div><span><h2>Live operations</h2><small>Customer, vendor and partner activity</small></span></div><OrdersTable orders={active.slice(0,7)} act={act} busy={busy}/></section></>}{page==="Live Orders"&&<AdminLiveOrders/>}{["Live Operations","Orders"].includes(page)&&<WorkspacePage eyebrow="REALTIME OPERATIONS" title={page} copy="Monitor status and intervene when necessary."><OrdersTable orders={page==="Orders"?orders:active} act={act} busy={busy}/></WorkspacePage>}{page==="Rides"&&<WorkspacePage eyebrow="RIDE ENGINE" title="Bike taxi" copy="Ride requests, driver assignments and completions."><OrdersTable orders={rides} act={act} busy={busy}/></WorkspacePage>}{page==="Parcels"&&<WorkspacePage eyebrow="PARCEL ENGINE" title="Parcel operations" copy="Pickup, transit and delivery verification."><OrdersTable orders={parcels} act={act} busy={busy}/></WorkspacePage>}{page==="Catalog"&&<AdminCatalog state={state} act={act} busy={busy} retry={retry}/>} {page==="Discounts & Pricing"&&<AdminDiscounts/>} {page==="Settings"&&<AdminSettings state={state} act={act}/>} {page==="Finance"&&<StatsPage title="Platform finance" stats={[["Gross merchandise value",money(gmv)],["Platform revenue",money(gmv*.18)],["Vendor payable",money(gmv*.82)]]}/>} {page==="Vendors"&&<AdminVendors/>} {page==="Delivery Partners"&&<AdminPartners/>} {page==="Customers"&&<AdminCustomers/>} {page==="Support"&&<Directory title="Support tickets" rows={[["#TKT-1042","Order delayed","Open"],["#TKT-1039","Payment issue","In progress"],["#TKT-1034","Missing item","Resolved"]]}/>} {page==="Reports"&&<StatsPage title="Performance reports" stats={commerce.map((x)=>[x,`${orders.filter((o)=>o.service===x).length} orders`])}/>}</Shell>}
+function Admin({state,act,busy,retry}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean;retry:()=>Promise<void>}){const [page,setPage]=useState("Dashboard");const orders=state.orders;const gmv=orders.reduce((s,x)=>s+x.total,0);const active=orders.filter((x)=>!terminalStatuses.includes(x.status));const rides=orders.filter((x)=>x.service==="Bike Taxi");const parcels=orders.filter((x)=>x.service==="Parcel");return <Shell page={page} setPage={setPage} state={state}>{page==="Dashboard"&&<><div className="overview"><span><small>Command center</small><h2>Operations at a glance.</h2></span><b>LIVE DATA</b></div><Kpis items={[[money(gmv),"Total GMV","All services"],[String(orders.length),"Total orders & jobs","Live"],[String(active.length),"Active operations","Now"],[String(state.services.filter((x)=>x.enabled).length),"Enabled services","of 6"]]}/><section className="panel"><div><span><h2>Live operations</h2><small>Customer, vendor and partner activity</small></span></div><OrdersTable orders={active.slice(0,7)} act={act} busy={busy}/></section></>}{page==="Live Orders"&&<AdminLiveOrders/>}{["Live Operations","Orders"].includes(page)&&<WorkspacePage eyebrow="REALTIME OPERATIONS" title={page} copy="Monitor status and intervene when necessary."><OrdersTable orders={page==="Orders"?orders:active} act={act} busy={busy}/></WorkspacePage>}{page==="Rides"&&<WorkspacePage eyebrow="RIDE ENGINE" title="Bike taxi" copy="Ride requests, driver assignments and completions."><OrdersTable orders={rides} act={act} busy={busy}/></WorkspacePage>}{page==="Parcels"&&<WorkspacePage eyebrow="PARCEL ENGINE" title="Parcel operations" copy="Pickup, transit and delivery verification."><OrdersTable orders={parcels} act={act} busy={busy}/></WorkspacePage>}{page==="Catalog"&&<AdminCatalog state={state} act={act} busy={busy} retry={retry}/>} {page==="Discounts & Pricing"&&<AdminDiscounts/>} {page==="Settings"&&<AdminSettings state={state} act={act}/>} {page==="Finance"&&<AdminFinance/>} {page==="Vendors"&&<AdminVendors/>} {page==="Delivery Partners"&&<AdminPartners/>} {page==="Customers"&&<AdminCustomers/>} {page==="Support"&&<Directory title="Support tickets" rows={[["#TKT-1042","Order delayed","Open"],["#TKT-1039","Payment issue","In progress"],["#TKT-1034","Missing item","Resolved"]]}/>} {page==="Reports"&&<StatsPage title="Performance reports" stats={commerce.map((x)=>[x,`${orders.filter((o)=>o.service===x).length} orders`])}/>}</Shell>}
 function AdminCatalog({state,act,busy,retry}:{state:Snapshot;act:(x:Record<string,unknown>)=>Promise<boolean>;busy:boolean;retry:()=>Promise<void>}){
   const [showCreate,setShowCreate]=useState(false);
   const [error,setError]=useState("");
@@ -183,12 +183,12 @@ function AdminVendors(){
 function PrimaryActionButton({label,onClick}:{label:string;onClick:()=>void}){return <button className="primary" style={{width:"max-content",marginBottom:14}} onClick={onClick}>{label}</button>;}
 
 function CreateVendorForm({onCreated}:{onCreated:()=>void}){
-  const [form,setForm]=useState({name:"",area:"",latitude:"",longitude:"",businessType:"",manualOrderAcceptance:true});
+  const [form,setForm]=useState({name:"",area:"",latitude:"",longitude:"",businessType:"",ownerName:"",ownerEmail:"",ownerPhone:"",initialPassword:"",manualOrderAcceptance:true});
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
     try{
-      await adminApi("/restaurants",{method:"POST",body:JSON.stringify({name:form.name,area:form.area,latitude:Number(form.latitude),longitude:Number(form.longitude),businessType:form.businessType||null,manualOrderAcceptance:form.manualOrderAcceptance})});
+      await adminApi("/restaurants",{method:"POST",body:JSON.stringify({name:form.name,area:form.area,latitude:Number(form.latitude),longitude:Number(form.longitude),businessType:form.businessType||null,ownerName:form.ownerName,ownerEmail:form.ownerEmail,ownerPhone:form.ownerPhone||undefined,initialPassword:form.initialPassword,manualOrderAcceptance:form.manualOrderAcceptance})});
       onCreated();
     }catch(e){setError(e instanceof Error?e.message:"Could not create vendor");}finally{setBusy(false);}
   };
@@ -198,6 +198,10 @@ function CreateVendorForm({onCreated}:{onCreated:()=>void}){
     <label>Latitude<input required type="number" step="any" value={form.latitude} onChange={(e)=>setForm({...form,latitude:e.target.value})}/></label>
     <label>Longitude<input required type="number" step="any" value={form.longitude} onChange={(e)=>setForm({...form,longitude:e.target.value})}/></label>
     <label>Business type<input value={form.businessType} onChange={(e)=>setForm({...form,businessType:e.target.value})}/></label>
+    <label>Owner full name<input required value={form.ownerName} onChange={(e)=>setForm({...form,ownerName:e.target.value})}/></label>
+    <label>Owner email<input required type="email" value={form.ownerEmail} onChange={(e)=>setForm({...form,ownerEmail:e.target.value})}/></label>
+    <label>Owner phone<input value={form.ownerPhone} onChange={(e)=>setForm({...form,ownerPhone:e.target.value})}/></label>
+    <label>Initial password<input required type="password" minLength={8} value={form.initialPassword} onChange={(e)=>setForm({...form,initialPassword:e.target.value})}/></label>
     <label className="checkbox-label"><input type="checkbox" checked={form.manualOrderAcceptance} onChange={(e)=>setForm({...form,manualOrderAcceptance:e.target.checked})}/>Require vendor order acceptance</label>
     {error&&<p className="auth-error">{error}</p>}
     <button className="primary" disabled={busy}>{busy?"Creating…":"Create vendor"}</button>
@@ -220,7 +224,7 @@ function VendorTeamPanel({restaurantId}:{restaurantId:string}){
     try{await adminApi(`/restaurants/${restaurantId}/users/${member.id}`,{method:"PATCH",body:JSON.stringify({permissions:next})});await load();}
     catch(e){setError(e instanceof Error?e.message:"Could not update permissions");}finally{setBusy(false);}
   };
-  const resetAccess=async(userId:string)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/users/${userId}/reset-access`,{method:"POST"});}catch(e){setError(e instanceof Error?e.message:"Could not reset access");}finally{setBusy(false);}};
+  const resetAccess=async(userId:string)=>{const password=prompt("Enter a new temporary password (minimum 8 characters), or leave blank to only sign out existing devices:")??"";if(password&&password.length<8){setError("Password must be at least 8 characters.");return;}setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/users/${userId}/reset-access`,{method:"POST",body:JSON.stringify({password})});}catch(e){setError(e instanceof Error?e.message:"Could not reset access");}finally{setBusy(false);}};
   const remove=async(userId:string)=>{if(!confirm("Remove this vendor user?"))return;setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/users/${userId}`,{method:"DELETE"});await load();}catch(e){setError(e instanceof Error?e.message:"Could not remove this user");}finally{setBusy(false);}};
 
   return <div className="team-panel">
@@ -249,14 +253,14 @@ function VendorTeamPanel({restaurantId}:{restaurantId:string}){
 }
 
 function AddVendorUserForm({restaurantId,onCreated}:{restaurantId:string;onCreated:()=>void}){
-  const [form,setForm]=useState({name:"",email:"",phone:"",role:"VENDOR_STAFF",staffTitle:""});
+  const [form,setForm]=useState({name:"",email:"",phone:"",role:"VENDOR_STAFF",staffTitle:"",initialPassword:""});
   const [permissions,setPermissions]=useState<string[]>(["CAN_VIEW_ORDERS"]);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const togglePerm=(p:string)=>setPermissions(permissions.includes(p)?permissions.filter((x)=>x!==p):[...permissions,p]);
   const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
     try{
-      await adminApi(`/restaurants/${restaurantId}/users`,{method:"POST",body:JSON.stringify({name:form.name,email:form.email,phone:form.phone||undefined,role:form.role,staffTitle:form.staffTitle||null,permissions})});
+      await adminApi(`/restaurants/${restaurantId}/users`,{method:"POST",body:JSON.stringify({name:form.name,email:form.email,phone:form.phone||undefined,role:form.role,staffTitle:form.staffTitle||null,initialPassword:form.initialPassword,permissions})});
       onCreated();
     }catch(e){setError(e instanceof Error?e.message:"Could not create this vendor user");}finally{setBusy(false);}
   };
@@ -265,6 +269,7 @@ function AddVendorUserForm({restaurantId,onCreated}:{restaurantId:string;onCreat
     <label>Email<input required type="email" value={form.email} onChange={(e)=>setForm({...form,email:e.target.value})}/></label>
     <label>Phone (optional)<input value={form.phone} onChange={(e)=>setForm({...form,phone:e.target.value})}/></label>
     <label>Title (e.g. Kitchen Staff)<input value={form.staffTitle} onChange={(e)=>setForm({...form,staffTitle:e.target.value})}/></label>
+    <label>Initial password<input required type="password" minLength={8} value={form.initialPassword} onChange={(e)=>setForm({...form,initialPassword:e.target.value})}/></label>
     <label>Role
       <select value={form.role} onChange={(e)=>setForm({...form,role:e.target.value})}>
         <option value="VENDOR_OWNER">Owner</option>
@@ -273,7 +278,7 @@ function AddVendorUserForm({restaurantId,onCreated}:{restaurantId:string;onCreat
       </select>
     </label>
     <div className="permission-grid">{VENDOR_PERMISSIONS.map((p)=><label key={p} className="checkbox-label small"><input type="checkbox" checked={permissions.includes(p)} onChange={()=>togglePerm(p)}/>{label(p.replace("CAN_",""))}</label>)}</div>
-    <p className="muted-note">{"They'll sign into the Vendor App with an OTP sent to this email or phone — no password to hand over."}</p>
+    <p className="muted-note">They can sign in with this password or request an email OTP. Existing sessions are always revocable here.</p>
     {error&&<p className="auth-error">{error}</p>}
     <button className="primary" disabled={busy}>{busy?"Creating…":"Create vendor user"}</button>
   </form>;
@@ -415,7 +420,7 @@ function AdminPartners(){
 }
 
 function CreatePartnerForm({onCreated}:{onCreated:()=>void}){
-  const [form,setForm]=useState({name:"",email:"",phone:"",vehicleType:"Bike",vehicleNumber:"",licenceNumber:""});
+  const [form,setForm]=useState({name:"",email:"",phone:"",vehicleType:"Bike",vehicleNumber:"",licenceNumber:"",initialPassword:"",approveNow:true});
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
@@ -429,7 +434,9 @@ function CreatePartnerForm({onCreated}:{onCreated:()=>void}){
     <label>Vehicle type<input value={form.vehicleType} onChange={(e)=>setForm({...form,vehicleType:e.target.value})}/></label>
     <label>Vehicle number<input value={form.vehicleNumber} onChange={(e)=>setForm({...form,vehicleNumber:e.target.value})}/></label>
     <label>Licence number<input value={form.licenceNumber} onChange={(e)=>setForm({...form,licenceNumber:e.target.value})}/></label>
-    <p className="muted-note">{"They'll sign into the Delivery Partner App with an OTP, and can go online once approved here."}</p>
+    <label>Initial password<input required type="password" minLength={8} value={form.initialPassword} onChange={(e)=>setForm({...form,initialPassword:e.target.value})}/></label>
+    <label className="checkbox-label"><input type="checkbox" checked={form.approveNow} onChange={(e)=>setForm({...form,approveNow:e.target.checked})}/>Approve this partner immediately</label>
+    <p className="muted-note">They can sign in with this password or request an email OTP.</p>
     {error&&<p className="auth-error">{error}</p>}
     <button className="primary" disabled={busy}>{busy?"Creating…":"Create delivery partner"}</button>
   </form>;
@@ -492,8 +499,34 @@ function AdminOrderDetail({orderId}:{orderId:string}){
   </div>;
 }
 
-type AdminPricingSettings = { deliveryFee:number; platformFee:number; taxRatePercent:number; restaurantDiscountThreshold:number; restaurantDiscountAmount:number };
+type AdminPricingSettings = { deliveryFee:number; platformFee:number; taxRatePercent:number; restaurantDiscountThreshold:number; restaurantDiscountAmount:number; vendorCommissionPercent:number; deliveryPartnerPayout:number };
 type AdminCoupon = { id:string; code:string; title:string; description:string; type:"PERCENT"|"FLAT"|"FREE_DELIVERY"; value:number; minOrder:number; maxDiscount:number|null; active:boolean; targetRestaurantIds:string[]; targetFoodItemIds:string[]; showOnHome:boolean };
+
+type FinanceData = {
+  summary:{recognizedOrders:number;pendingOrders:number;cancelledOrders:number;customerRevenue:number;merchandiseValue:number;discounts:number;taxes:number;platformGrossRevenue:number;platformNetRevenue:number;vendorPayable:number;partnerPayable:number;legacyEstimatedOrders:number};
+  byService:{service:string;orders:number;customerRevenue:number;platformNetRevenue:number;vendorPayable:number;partnerPayout:number}[];
+  vendorSettlements:{vendorId:string;vendorName:string;orders:number;grossFoodSales:number;commission:number;payable:number}[];
+};
+
+function AdminFinance(){
+  const [data,setData]=useState<FinanceData|null>(null);
+  const [error,setError]=useState("");
+  const load=useCallback(async()=>{try{const result=await adminApi<FinanceData>("/finance");setData(result);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not calculate finance");}},[]);
+  useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
+  if(!data)return <WorkspacePage eyebrow="FINANCE LEDGER" title="Platform finance" copy="Recognized only after an order is delivered or completed."><Empty title={error?"Finance unavailable":"Calculating…"} copy={error||"Reading order settlement records."}/></WorkspacePage>;
+  const s=data.summary;
+  return <WorkspacePage eyebrow="FINANCE LEDGER" title="Platform finance" copy="Real settlement values from completed order snapshots — pricing changes do not rewrite history.">
+    <Kpis items={[[money(s.customerRevenue),"Customer revenue",`${s.recognizedOrders} completed`],[money(s.platformNetRevenue),"Net platform revenue","after partner payouts"],[money(s.vendorPayable),"Vendor payable","completed orders"],[money(s.partnerPayable),"Partner payable","delivery earnings"]]}/>
+    <div className="stat-list">
+      {[["Merchandise value",money(s.merchandiseValue)],["Discounts funded",money(s.discounts)],["Taxes collected",money(s.taxes)],["Gross platform revenue",money(s.platformGrossRevenue)],["Pending orders",String(s.pendingOrders)],["Cancelled orders",String(s.cancelledOrders)]].map((row)=><article key={row[0]}><span>{row[0]}</span><strong>{row[1]}</strong></article>)}
+    </div>
+    {s.legacyEstimatedOrders>0&&<p className="muted-note">{s.legacyEstimatedOrders} older food order{s.legacyEstimatedOrders===1?" uses":"s use"} the current commission rule because it predates settlement snapshots. New orders are exact.</p>}
+    <h4 style={{margin:"28px 0 10px",fontSize:11}}>Revenue by service</h4>
+    <div className="directory">{data.byService.map((row)=><article key={row.service}><i>{row.service[0]}</i><span><b>{row.service}</b><small>{row.orders} completed • Vendor {money(row.vendorPayable)} • Partner {money(row.partnerPayout)}</small></span><strong>{money(row.customerRevenue)}</strong><small>Net {money(row.platformNetRevenue)}</small></article>)}</div>
+    <h4 style={{margin:"28px 0 10px",fontSize:11}}>Vendor settlements</h4>
+    {!data.vendorSettlements.length?<p className="muted-note">No completed vendor settlements yet.</p>:<div className="directory">{data.vendorSettlements.map((row)=><article key={row.vendorId}><i>{row.vendorName[0]||"V"}</i><span><b>{row.vendorName}</b><small>{row.orders} completed • Sales {money(row.grossFoodSales)} • Commission {money(row.commission)}</small></span><strong>{money(row.payable)}</strong></article>)}</div>}
+  </WorkspacePage>;
+}
 
 function AdminDiscounts(){
   return <WorkspacePage eyebrow="MONEY & PROMOTIONS" title="Discounts & Pricing" copy="Set platform pricing and create offers for all restaurants, selected restaurants, or selected food items.">
@@ -532,6 +565,8 @@ function PricingSettingsPanel(){
       <label>Tax rate (%)<input type="number" min={0} max={100} step="0.1" value={form.taxRatePercent} onChange={(e)=>setForm({...form,taxRatePercent:Number(e.target.value)})}/></label>
       <label>Restaurant discount threshold (₹)<input type="number" min={0} step="1" value={form.restaurantDiscountThreshold} onChange={(e)=>setForm({...form,restaurantDiscountThreshold:Number(e.target.value)})}/></label>
       <label>Restaurant discount amount (₹)<input type="number" min={0} step="1" value={form.restaurantDiscountAmount} onChange={(e)=>setForm({...form,restaurantDiscountAmount:Number(e.target.value)})}/></label>
+      <label>Vendor commission (%)<input type="number" min={0} max={100} step="0.1" value={form.vendorCommissionPercent} onChange={(e)=>setForm({...form,vendorCommissionPercent:Number(e.target.value)})}/></label>
+      <label>Partner payout per food delivery (₹)<input type="number" min={0} step="1" value={form.deliveryPartnerPayout} onChange={(e)=>setForm({...form,deliveryPartnerPayout:Number(e.target.value)})}/></label>
     </div>
     <p className="muted-note">Orders above the threshold automatically get the discount amount taken off — this is separate from coupon codes below.</p>
     {error&&<p className="auth-error">{error}</p>}

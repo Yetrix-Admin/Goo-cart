@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { Order, User } from "../models.js";
+import { Order, ServiceOrder, User } from "../models.js";
 import { requireRole, canPartner, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
 import { isValidCoordinate } from "../lib/geo.js";
@@ -101,19 +101,77 @@ partnerRouter.post("/active-delivery/release", async (req: AuthedRequest, res) =
 
 partnerRouter.get("/earnings", async (req: AuthedRequest, res) => {
   try {
-    const completed = await Order.find({ partnerId: req.user!._id, status: "DELIVERED" }, { bill: 1, updatedAt: 1, orderNumber: 1 }).sort({ updatedAt: -1 }).lean();
-    // Flat per-delivery payout placeholder until a real payout/pricing rule
-    // is wired up — deliberately conservative rather than inventing a number
-    // that looks authoritative but isn't backed by any ledger.
-    const PER_DELIVERY_PAYOUT = 35;
+    const [completed, serviceCompleted] = await Promise.all([
+      Order.find({ partnerId: req.user!._id, status: "DELIVERED" }, { bill: 1, updatedAt: 1, orderNumber: 1 }).sort({ updatedAt: -1 }).lean(),
+      ServiceOrder.find({ partnerId: req.user!._id, status: { $in: ["DELIVERED", "COMPLETED"] } }, { details: 1, updatedAt: 1, reference: 1 }).sort({ updatedAt: -1 }).lean(),
+    ]);
+    const history = [
+      ...completed.map((o: any) => ({ orderNumber: o.orderNumber, amount: Number(o.bill?.deliveryPartnerPayout ?? 0), at: o.updatedAt })),
+      ...serviceCompleted.map((o: any) => ({ orderNumber: o.reference, amount: Number(o.details?.partnerPayout ?? 0), at: o.updatedAt })),
+    ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
     res.json(
       ok({
-        totalDeliveries: completed.length,
-        totalEarnings: completed.length * PER_DELIVERY_PAYOUT,
-        history: completed.slice(0, 50).map((o: any) => ({ orderNumber: o.orderNumber, amount: PER_DELIVERY_PAYOUT, at: o.updatedAt })),
+        totalDeliveries: history.length,
+        totalEarnings: history.reduce((sum, row) => sum + row.amount, 0),
+        history: history.slice(0, 50),
       }),
     );
   } catch (e) {
     res.status(500).json(fail("EARNINGS_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load earnings"));
+  }
+});
+
+const serviceJobDTO = (o: any) => ({
+  id: String(o._id), reference: o.reference, service: o.service, vendorName: o.vendorName, customerName: o.customerName,
+  status: o.status, total: o.total, details: o.details ?? {}, partnerId: o.partnerId ? String(o.partnerId) : null, partnerName: o.partnerName ?? null,
+  createdAt: o.createdAt, updatedAt: o.updatedAt,
+});
+
+partnerRouter.get("/service-jobs", async (req: AuthedRequest, res) => {
+  try {
+    const jobs = await ServiceOrder.find({ $or: [{ partnerId: req.user!._id }, { partnerId: null, status: "READY_FOR_PICKUP" }] }).sort({ createdAt: -1 }).limit(200).lean();
+    res.json(ok({ jobs: jobs.map(serviceJobDTO) }));
+  } catch (e) {
+    res.status(500).json(fail("SERVICE_JOBS_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load service jobs"));
+  }
+});
+
+partnerRouter.post("/service-jobs/:id/claim", async (req: AuthedRequest, res) => {
+  try {
+    const partner = await User.findById(req.user!._id).lean();
+    if (!partner || partner.status !== "ACTIVE" || partner.partnerApprovalStatus !== "APPROVED" || !partner.partnerOnline || partner.partnerBusy) {
+      return res.status(409).json(fail("PARTNER_NOT_ELIGIBLE", "You must be approved, online and free to accept this job."));
+    }
+    const job = await ServiceOrder.findOneAndUpdate(
+      { _id: req.params.id, partnerId: null, status: "READY_FOR_PICKUP" },
+      { $set: { partnerId: partner._id, partnerName: partner.name, status: "PARTNER_ASSIGNED" } },
+      { new: true },
+    );
+    if (!job) return res.status(409).json(fail("JOB_ALREADY_ASSIGNED", "This job was already accepted by another partner."));
+    await User.updateOne({ _id: partner._id }, { $set: { partnerBusy: true } });
+    res.json(ok({ job: serviceJobDTO(job.toObject()) }, "Job accepted"));
+  } catch (e) {
+    res.status(500).json(fail("JOB_CLAIM_FAILED", e instanceof Error ? e.message : "Could not accept this job"));
+  }
+});
+
+partnerRouter.post("/service-jobs/:id/status", async (req: AuthedRequest, res) => {
+  try {
+    const job: any = await ServiceOrder.findOne({ _id: req.params.id, partnerId: req.user!._id });
+    if (!job) return res.status(404).json(fail("JOB_NOT_FOUND", "Assigned job not found."));
+    const to = String(req.body?.to ?? "");
+    const rideFlow: Record<string, string[]> = { PARTNER_ASSIGNED: ["ARRIVING"], ARRIVING: ["IN_PROGRESS"], IN_PROGRESS: ["COMPLETED"] };
+    const deliveryFlow: Record<string, string[]> = { PARTNER_ASSIGNED: ["PICKED_UP"], PICKED_UP: ["IN_TRANSIT"], IN_TRANSIT: ["DELIVERED"] };
+    const flow = job.service === "Bike Taxi" ? rideFlow : deliveryFlow;
+    if (!(flow[job.status] ?? []).includes(to)) return res.status(409).json(fail("INVALID_TRANSITION", `Cannot move ${job.status} to ${to}.`));
+    if (["COMPLETED", "DELIVERED"].includes(to) && String(req.body?.code ?? "") !== String(job.details?.verificationCode ?? "")) {
+      return res.status(401).json(fail("INVALID_CODE", "Ask the customer for the correct verification code."));
+    }
+    job.status = to;
+    await job.save();
+    if (["COMPLETED", "DELIVERED"].includes(to)) await User.updateOne({ _id: req.user!._id }, { $set: { partnerBusy: false } });
+    res.json(ok({ job: serviceJobDTO(job.toObject()) }, "Job updated"));
+  } catch (e) {
+    res.status(500).json(fail("JOB_UPDATE_FAILED", e instanceof Error ? e.message : "Could not update this job"));
   }
 });

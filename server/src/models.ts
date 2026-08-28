@@ -279,6 +279,10 @@ const orderSchema = new Schema(
       platformFee: { type: Number, default: 0 },
       taxes: { type: Number, default: 0 },
       tip: { type: Number, default: 0 },
+      vendorCommission: { type: Number, default: 0 },
+      vendorPayable: { type: Number, default: 0 },
+      deliveryPartnerPayout: { type: Number, default: 0 },
+      platformNetRevenue: { type: Number, default: 0 },
       total: Number,
     },
     deliveryAddress: { type: Schema.Types.Mixed, required: true },
@@ -429,6 +433,7 @@ const pricingRuleSchema = new Schema(
     baseFare: { type: Number, required: true, min: 0 },
     perKm: { type: Number, required: true, min: 0 },
     platformFee: { type: Number, required: true, min: 0 },
+    partnerPayoutPercent: { type: Number, required: true, min: 0, max: 100, default: 80 },
   },
   { versionKey: false, timestamps: true },
 );
@@ -445,6 +450,8 @@ const pricingSettingsSchema = new Schema(
     taxRatePercent: { type: Number, required: true, min: 0, max: 100 },
     restaurantDiscountThreshold: { type: Number, required: true, min: 0 },
     restaurantDiscountAmount: { type: Number, required: true, min: 0 },
+    vendorCommissionPercent: { type: Number, required: true, min: 0, max: 100 },
+    deliveryPartnerPayout: { type: Number, required: true, min: 0 },
   },
   { versionKey: false, timestamps: true },
 );

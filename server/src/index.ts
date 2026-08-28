@@ -1,4 +1,4 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import http from "node:http";
 import express from "express";
 import cors from "cors";
@@ -16,6 +16,11 @@ import { notificationsRouter } from "./routes/notifications.js";
 import { fail, ok } from "./lib/http.js";
 import { initRealtime } from "./lib/realtime.js";
 import { startAcceptanceWatchdog } from "./lib/acceptanceWatchdog.js";
+
+dotenv.config();
+// Local secrets can be split from the Atlas connection file. Both files are
+// ignored by Git; production continues to use host-managed environment vars.
+dotenv.config({ path: ".env.resend", override: true });
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
