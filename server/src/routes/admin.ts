@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { AuditLog, Coupon, FoodItem, Order, Product, Restaurant, ServiceOrder, Session, User } from "../models.js";
+import { AuditLog, Coupon, FoodItem, Order, PricingRule, Product, Restaurant, ServiceOrder, Session, User } from "../models.js";
 import { requireRole, canAdmin, hashPassword, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
 import { toFoodItemDTO, toRestaurantDTO } from "./catalog.js";
@@ -774,7 +774,10 @@ adminRouter.get("/finance", async (_req, res) => {
       const details = order.details ?? {};
       const isCommerce = ["Grocery", "Vegetables", "Mart"].includes(order.service);
       const subtotal = Number(details.subtotal ?? (isCommerce ? order.total : 0));
-      const platformFees = Number(details.fees ?? details.platformFee ?? (isCommerce ? Math.max(0, order.total - subtotal) : 0));
+      const feeSnapshot = details.fees !== undefined
+        ? Number(details.fees)
+        : Number(details.platformFee ?? 0) + Number(details.deliveryFee ?? 0);
+      const platformFees = feeSnapshot || (isCommerce ? Math.max(0, Number(order.total ?? 0) - subtotal - Number(details.taxes ?? 0)) : 0);
       const partnerPayout = Number(details.partnerPayout ?? 0);
       const vendorPayable = Number(details.vendorPayable ?? (isCommerce ? subtotal : 0));
       rows.push({
@@ -846,6 +849,46 @@ adminRouter.patch("/pricing-settings", async (req: AuthedRequest, res) => {
     res.json(ok({ pricing }, "Pricing updated"));
   } catch (e) {
     res.status(500).json(fail("PRICING_UPDATE_FAILED", e instanceof Error ? e.message : "Could not update pricing settings"));
+  }
+});
+
+adminRouter.get("/service-pricing", async (_req, res) => {
+  try {
+    const rows = await PricingRule.find().sort({ _id: 1 }).lean();
+    res.json(ok({
+      pricing: rows.map((row: any) => ({
+        service: row._id,
+        baseFare: row.baseFare,
+        perKm: row.perKm,
+        platformFee: row.platformFee,
+        partnerPayoutPercent: row.partnerPayoutPercent ?? 80,
+      })),
+    }));
+  } catch (e) {
+    res.status(500).json(fail("SERVICE_PRICING_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load service pricing"));
+  }
+});
+
+adminRouter.patch("/service-pricing/:service", async (req: AuthedRequest, res) => {
+  try {
+    const service = req.params.service === "Bike Taxi" ? "Bike Taxi" : req.params.service === "Parcel" ? "Parcel" : "";
+    if (!service) return res.status(400).json(fail("INVALID_SERVICE", "Only Bike Taxi and Parcel pricing can be edited here."));
+    const body = req.body ?? {};
+    const patch: Record<string, number> = {};
+    for (const field of ["baseFare", "perKm", "platformFee", "partnerPayoutPercent"]) {
+      if (body[field] === undefined) continue;
+      const value = Number(body[field]);
+      if (!Number.isFinite(value) || value < 0) return res.status(400).json(fail("INVALID_VALUE", `${field} must be a non-negative number.`));
+      if (field === "partnerPayoutPercent" && value > 100) return res.status(400).json(fail("INVALID_VALUE", "partnerPayoutPercent cannot exceed 100%."));
+      patch[field] = value;
+    }
+    if (!Object.keys(patch).length) return res.status(400).json(fail("NO_CHANGES", "Enter at least one pricing value."));
+    const before = await PricingRule.findById(service).lean();
+    const pricing = await PricingRule.findByIdAndUpdate(service, patch, { upsert: true, new: true, setDefaultsOnInsert: true }).lean();
+    await audit(req, "service_pricing.update", "pricing", service, before, pricing);
+    res.json(ok({ pricing }, "Service pricing updated"));
+  } catch (e) {
+    res.status(500).json(fail("SERVICE_PRICING_UPDATE_FAILED", e instanceof Error ? e.message : "Could not update service pricing"));
   }
 });
 

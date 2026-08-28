@@ -103,3 +103,28 @@ export type FoodOrder = {
   deliveryPartner: { id: string; name: string | null } | null;
   deliveryOtp: string | null;
 };
+
+export type ServiceJobStatus =
+  | "READY_FOR_PICKUP"
+  | "PARTNER_ASSIGNED"
+  | "ARRIVING"
+  | "IN_PROGRESS"
+  | "PICKED_UP"
+  | "IN_TRANSIT"
+  | "DELIVERED"
+  | "COMPLETED";
+
+export type ServiceJob = {
+  id: string;
+  reference: string;
+  service: "Grocery" | "Vegetables" | "Mart" | "Bike Taxi" | "Parcel";
+  vendorName: string;
+  customerName: string;
+  status: ServiceJobStatus;
+  total: number;
+  details: Record<string, unknown>;
+  partnerId: string | null;
+  partnerName: string | null;
+  createdAt: string;
+  updatedAt: string;
+};

@@ -501,6 +501,7 @@ function AdminOrderDetail({orderId}:{orderId:string}){
 
 type AdminPricingSettings = { deliveryFee:number; platformFee:number; taxRatePercent:number; restaurantDiscountThreshold:number; restaurantDiscountAmount:number; vendorCommissionPercent:number; deliveryPartnerPayout:number };
 type AdminCoupon = { id:string; code:string; title:string; description:string; type:"PERCENT"|"FLAT"|"FREE_DELIVERY"; value:number; minOrder:number; maxDiscount:number|null; active:boolean; targetRestaurantIds:string[]; targetFoodItemIds:string[]; showOnHome:boolean };
+type AdminServicePricing = { service:"Bike Taxi"|"Parcel"; baseFare:number; perKm:number; platformFee:number; partnerPayoutPercent:number };
 
 type FinanceData = {
   summary:{recognizedOrders:number;pendingOrders:number;cancelledOrders:number;customerRevenue:number;merchandiseValue:number;discounts:number;taxes:number;platformGrossRevenue:number;platformNetRevenue:number;vendorPayable:number;partnerPayable:number;legacyEstimatedOrders:number};
@@ -531,6 +532,8 @@ function AdminFinance(){
 function AdminDiscounts(){
   return <WorkspacePage eyebrow="MONEY & PROMOTIONS" title="Discounts & Pricing" copy="Set platform pricing and create offers for all restaurants, selected restaurants, or selected food items.">
     <PricingSettingsPanel/>
+    <div style={{height:28}}/>
+    <ServicePricingPanel/>
     <div style={{height:28}}/>
     <CouponsPanel/>
   </WorkspacePage>;
@@ -573,6 +576,30 @@ function PricingSettingsPanel(){
     {saved&&<p className="muted-note" style={{color:"#247340"}}>Saved — every new order uses these values immediately.</p>}
     <button className="primary" disabled={busy || JSON.stringify(form)===JSON.stringify(pricing)}>{busy?"Saving…":"Save pricing"}</button>
   </form>;
+}
+
+function ServicePricingPanel(){
+  const [rows,setRows]=useState<AdminServicePricing[]|null>(null);
+  const [busy,setBusy]=useState<string|null>(null);
+  const [error,setError]=useState("");
+  const load=useCallback(async()=>{try{const r=await adminApi<{pricing:AdminServicePricing[]}>("/service-pricing");setRows(r.pricing.filter((row)=>row.service==="Bike Taxi"||row.service==="Parcel"));setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load service pricing");}},[]);
+  useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
+  const update=(service:AdminServicePricing["service"],field:keyof Omit<AdminServicePricing,"service">,value:number)=>setRows((current)=>current?.map((row)=>row.service===service?{...row,[field]:value}:row)??null);
+  const save=async(row:AdminServicePricing)=>{setBusy(row.service);setError("");try{await adminApi(`/service-pricing/${encodeURIComponent(row.service)}`,{method:"PATCH",body:JSON.stringify(row)});await load();}catch(e){setError(e instanceof Error?e.message:"Could not save service pricing");}finally{setBusy(null);}};
+  if(!rows)return <div className="inline-form"><p className="muted-note">{error||"Loading ride and parcel pricing…"}</p></div>;
+  return <div className="auth-form inline-form">
+    <h4 style={{margin:"0 0 4px",fontSize:11}}>Bike taxi & parcel pricing</h4>
+    {error&&<p className="auth-error">{error}</p>}
+    <div className="directory">{rows.map((row)=><article key={row.service}>
+      <i>{row.service[0]}</i>
+      <span><b>{row.service}</b><small>Fare = base + per km + platform fee. Partner payout is calculated from fare.</small></span>
+      <label>Base ₹<input type="number" min={0} step="1" value={row.baseFare} onChange={(e)=>update(row.service,"baseFare",Number(e.target.value))}/></label>
+      <label>Per km ₹<input type="number" min={0} step="1" value={row.perKm} onChange={(e)=>update(row.service,"perKm",Number(e.target.value))}/></label>
+      <label>Fee ₹<input type="number" min={0} step="1" value={row.platformFee} onChange={(e)=>update(row.service,"platformFee",Number(e.target.value))}/></label>
+      <label>Payout %<input type="number" min={0} max={100} step="0.1" value={row.partnerPayoutPercent} onChange={(e)=>update(row.service,"partnerPayoutPercent",Number(e.target.value))}/></label>
+      <button className="secondary" disabled={busy===row.service} onClick={()=>void save(row)}>{busy===row.service?"Saving…":"Save"}</button>
+    </article>)}</div>
+  </div>;
 }
 
 function CouponsPanel(){

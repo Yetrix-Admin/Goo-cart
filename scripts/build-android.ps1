@@ -19,6 +19,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $outputRoot = Join-Path $repoRoot "outputs\android"
 $projectGradleHome = Join-Path $repoRoot ".gradle-cache"
+$projectAndroidHome = Join-Path $repoRoot ".android-home"
 
 # Android Studio bundles a JDK, but it does not always expose JAVA_HOME to
 # external PowerShell sessions. Prefer an already-installed Gradle JDK 17 and
@@ -37,6 +38,62 @@ if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
   $env:Path = "$(Join-Path $env:JAVA_HOME 'bin');$env:Path"
 }
 $env:GRADLE_USER_HOME = $projectGradleHome
+$env:ANDROID_USER_HOME = $projectAndroidHome
+Remove-Item Env:\ANDROID_SDK_HOME -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $projectAndroidHome -Force | Out-Null
+
+function Resolve-NodeBinary {
+  $candidates = @()
+  if (-not [string]::IsNullOrWhiteSpace($env:NODE_BINARY)) {
+    $candidates += $env:NODE_BINARY
+  }
+
+  $pathNode = Get-Command node.exe -ErrorAction SilentlyContinue
+  if ($pathNode) {
+    $candidates += $pathNode.Source
+  }
+
+  $programFilesNode = "C:\Program Files\nodejs\node.exe"
+  $bundledNode = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
+  $candidates += @($programFilesNode, $bundledNode)
+
+  foreach ($candidate in $candidates) {
+    if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate)) {
+      return (Resolve-Path -LiteralPath $candidate).Path
+    }
+  }
+
+  throw "Node.js was not found. Install Node.js 22 LTS or set NODE_BINARY to your node.exe path before building in Android Studio."
+}
+
+function Set-AndroidLocalProperty {
+  param([string]$AndroidRoot, [string]$Name, [string]$Value)
+
+  $localPropertiesPath = Join-Path $AndroidRoot "local.properties"
+  [string[]]$lines = @()
+  if (Test-Path -LiteralPath $localPropertiesPath) {
+    $lines = [string[]]@(Get-Content -LiteralPath $localPropertiesPath)
+  }
+  $escapedValue = $Value.Replace('\', '\\')
+  $propertyLine = "$Name=$escapedValue"
+  $updated = $false
+  $nextLines = foreach ($line in $lines) {
+    if ($line -match "^\s*$([regex]::Escape($Name))=") {
+      $updated = $true
+      $propertyLine
+    } else {
+      $line
+    }
+  }
+  if (-not $updated) {
+    $nextLines = @($nextLines) + $propertyLine
+  }
+  Set-Content -LiteralPath $localPropertiesPath -Value $nextLines -Encoding ASCII
+}
+
+$nodeBinary = Resolve-NodeBinary
+$env:NODE_BINARY = $nodeBinary
+$env:Path = "$(Split-Path -Parent $nodeBinary);$env:Path"
 
 $apps = @(
   [pscustomobject]@{
@@ -61,7 +118,7 @@ $apps = @(
     DisplayName = "Goocart Delivery Partner"
     Package = "com.goocart.delivery"
     ArtifactName = "Goocart-Delivery"
-    SigningPrefix = "GOOCARTDELIVERY_"
+    SigningPrefix = "GOOCARTPARTNER_"
   }
 )
 
@@ -196,6 +253,7 @@ foreach ($appConfig in $apps) {
   }
 
   $androidRoot = Join-Path $appRoot "android"
+  Set-AndroidLocalProperty $androidRoot "node.binary" $nodeBinary
   $appGradle = Join-Path $androidRoot "app\build.gradle"
   $manifest = Join-Path $androidRoot "app\src\main\AndroidManifest.xml"
   $strings = Join-Path $androidRoot "app\src\main\res\values\strings.xml"
@@ -231,7 +289,13 @@ foreach ($appConfig in $apps) {
     "aab" { @("bundleRelease") }
     default { @("assembleRelease", "bundleRelease") }
   }
-  $gradleArgs = @($tasks)
+  $gradleArgs = @(
+    "--no-daemon",
+    "--stacktrace",
+    "-Duser.home=$projectAndroidHome",
+    "-Dandroid.user.home=$projectAndroidHome",
+    "-Dkotlin.compiler.execution.strategy=in-process"
+  ) + $tasks
   if (-not $signingState.Ready) {
     $gradleArgs += "-Pgoocart.allowDebugSigning=true"
   }

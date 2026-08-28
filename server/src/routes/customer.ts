@@ -7,7 +7,6 @@ import { getPricingSettings } from "../lib/pricingSettings.js";
 import { reserveLines, consumeReservations, releaseReservations } from "../lib/inventory.js";
 
 export const customerRouter = Router();
-customerRouter.use(requireAuth);
 
 // Addresses are looked up fresh from the user document (never trusted from
 // the request) so a customer can only ever read or edit their own.
@@ -27,7 +26,7 @@ const addressDTO = (a: any) => ({
   isDefault: a.isDefault,
 });
 
-customerRouter.get("/addresses", async (req: AuthedRequest, res) => {
+customerRouter.get("/addresses", requireAuth, async (req: AuthedRequest, res) => {
   try {
     const user = await User.findById(req.user!._id, { addresses: 1 }).lean();
     res.json(ok({ addresses: (user?.addresses ?? []).map(addressDTO) }));
@@ -36,7 +35,7 @@ customerRouter.get("/addresses", async (req: AuthedRequest, res) => {
   }
 });
 
-customerRouter.post("/addresses", async (req: AuthedRequest, res) => {
+customerRouter.post("/addresses", requireAuth, async (req: AuthedRequest, res) => {
   try {
     const body = req.body ?? {};
     // Latitude/longitude are mandatory: they drive delivery-partner
@@ -75,7 +74,7 @@ customerRouter.post("/addresses", async (req: AuthedRequest, res) => {
   }
 });
 
-customerRouter.patch("/addresses/:id", async (req: AuthedRequest, res) => {
+customerRouter.patch("/addresses/:id", requireAuth, async (req: AuthedRequest, res) => {
   try {
     const user = await User.findById(req.user!._id);
     if (!user) return res.status(404).json(fail("USER_NOT_FOUND", "Account not found"));
@@ -105,7 +104,7 @@ customerRouter.patch("/addresses/:id", async (req: AuthedRequest, res) => {
   }
 });
 
-customerRouter.delete("/addresses/:id", async (req: AuthedRequest, res) => {
+customerRouter.delete("/addresses/:id", requireAuth, async (req: AuthedRequest, res) => {
   try {
     const user = await User.findById(req.user!._id);
     if (!user) return res.status(404).json(fail("USER_NOT_FOUND", "Account not found"));
@@ -165,7 +164,7 @@ customerRouter.get("/services/:key/products", async (req, res) => {
   }
 });
 
-customerRouter.get("/service-orders", async (req: AuthedRequest, res) => {
+customerRouter.get("/service-orders", requireAuth, async (req: AuthedRequest, res) => {
   try {
     const orders = await ServiceOrder.find({ customerId: req.user!._id }).sort({ createdAt: -1 }).limit(200).lean();
     res.json(ok({ orders: orders.map(serviceOrderDTO) }));
@@ -174,7 +173,7 @@ customerRouter.get("/service-orders", async (req: AuthedRequest, res) => {
   }
 });
 
-customerRouter.post("/service-orders", async (req: AuthedRequest, res) => {
+customerRouter.post("/service-orders", requireAuth, async (req: AuthedRequest, res) => {
   try {
     const body = req.body ?? {};
     const service = SERVICE_NAMES[String(body.service ?? "").toUpperCase()];

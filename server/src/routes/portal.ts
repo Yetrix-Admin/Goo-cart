@@ -16,6 +16,8 @@ import {
 import { canAdmin, canPartner, canVendor, requireAuth, type AuthedRequest } from "../lib/auth.js";
 import { canTransition, type OrderStatus } from "../lib/orderState.js";
 import { ok, fail } from "../lib/http.js";
+import { getPricingSettings } from "../lib/pricingSettings.js";
+import { reserveLines, consumeReservations, releaseReservations } from "../lib/inventory.js";
 
 export const portalRouter = Router();
 
@@ -251,12 +253,13 @@ portalRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
         const baseFare = Number(body.baseFare);
         const perKm = Number(body.perKm);
         const platformFee = Number(body.platformFee);
-        if (!["Bike Taxi", "Parcel"].includes(service) || [baseFare, perKm, platformFee].some((n) => !Number.isFinite(n) || n < 0)) {
+        const partnerPayoutPercent = body.partnerPayoutPercent === undefined ? 80 : Number(body.partnerPayoutPercent);
+        if (!["Bike Taxi", "Parcel"].includes(service) || [baseFare, perKm, platformFee, partnerPayoutPercent].some((n) => !Number.isFinite(n) || n < 0) || partnerPayoutPercent > 100) {
           return res.status(400).json(fail("INVALID_PRICING", "Enter valid non-negative pricing"));
         }
         const before = await PricingRule.findById(service).lean();
-        await PricingRule.findByIdAndUpdate(service, { baseFare, perKm, platformFee }, { upsert: true });
-        await audit(user, "pricing.update", "pricing", service, before, { baseFare, perKm, platformFee });
+        await PricingRule.findByIdAndUpdate(service, { baseFare, perKm, platformFee, partnerPayoutPercent }, { upsert: true });
+        await audit(user, "pricing.update", "pricing", service, before, { baseFare, perKm, platformFee, partnerPayoutPercent });
         return res.json(ok(await buildSnapshot(user), "Pricing updated"));
       }
 
@@ -347,7 +350,7 @@ portalRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
           vendorName: service === "Bike Taxi" ? "Goocart Bike" : "Goocart Parcel",
           customerId: user._id,
           customerName: user.name,
-          status: service === "Bike Taxi" ? "REQUESTED" : "CREATED",
+          status: "READY_FOR_PICKUP",
           total,
           details: {
             pickup,
@@ -385,36 +388,53 @@ portalRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
         const enabled = await ServiceConfig.findById(service).lean();
         if (enabled && (enabled as any).enabled === false) return res.status(409).json(fail("SERVICE_UNAVAILABLE", "This service is temporarily unavailable"));
 
-        const subtotal = lines.reduce((s, l) => s + l.product.price * l.qty, 0);
-        const total = subtotal + 34;
+        const pricing = await getPricingSettings();
+        const subtotal = Math.round(lines.reduce((s, l) => s + l.product.price * l.qty, 0));
+        const taxes = Math.round(subtotal * pricing.taxRatePercent / 100);
+        const vendorCommission = Math.round(subtotal * pricing.vendorCommissionPercent / 100);
+        const vendorPayable = subtotal - vendorCommission;
+        const total = subtotal + pricing.deliveryFee + pricing.platformFee + taxes;
         const prefix: Record<string, string> = { Food: "FD", Grocery: "GR", Vegetables: "VG", Mart: "MT" };
         const seq = await nextSequence("serviceOrderNumber");
         const reference = `GOO-${prefix[service] ?? "OR"}-${new Date().getFullYear()}-${String(seq).padStart(6, "0")}`;
 
-        // Stock is decremented conditionally so two concurrent checkouts cannot
-        // both take the last unit.
-        for (const l of lines) {
-          const dec = await Product.updateOne({ _id: l.product._id, stock: { $gte: l.qty } }, { $inc: { stock: -l.qty } });
-          if (dec.modifiedCount === 0) return res.status(409).json(fail("OUT_OF_STOCK", `${l.product.name} is unavailable`));
+        const reserved = await reserveLines(lines.map((l) => ({ productId: l.product._id, quantity: l.qty })), user._id);
+        if (!reserved.ok) {
+          const failedLine = lines.find((line) => String(line.product._id) === reserved.productId);
+          return res.status(409).json(fail("OUT_OF_STOCK", `${failedLine?.product.name ?? "An item"} just sold out.`));
         }
 
-        const doc = await ServiceOrder.create({
-          reference,
-          service,
-          vendorId: lines[0].product.vendorId,
-          vendorName: lines[0].product.vendorName,
-          customerId: user._id,
-          customerName: user.name,
-          status: "PLACED",
-          total,
-          details: {
-            items: lines.map((l) => ({ name: l.product.name, qty: l.qty, price: l.product.price })),
-            subtotal,
-            fees: 34,
-            address: String(body.address ?? "Home"),
-            verificationCode: String(Math.floor(1000 + Math.random() * 9000)),
-          },
-        });
+        let doc;
+        try {
+          doc = await ServiceOrder.create({
+            reference,
+            service,
+            vendorId: lines[0].product.vendorId,
+            vendorName: lines[0].product.vendorName,
+            customerId: user._id,
+            customerName: user.name,
+            status: "READY_FOR_PICKUP",
+            total,
+            details: {
+              items: lines.map((l) => ({ name: l.product.name, qty: l.qty, price: l.product.price })),
+              subtotal,
+              deliveryFee: pricing.deliveryFee,
+              platformFee: pricing.platformFee,
+              taxes,
+              vendorCommission,
+              vendorPayable,
+              partnerPayout: pricing.deliveryPartnerPayout,
+              platformNetRevenue: pricing.deliveryFee + pricing.platformFee + vendorCommission - pricing.deliveryPartnerPayout,
+              address: body.address ?? "Home",
+              verificationCode: String(Math.floor(1000 + Math.random() * 9000)),
+              reservationIds: reserved.reservations.map((r) => r.reservationId),
+            },
+          });
+        } catch (e) {
+          await releaseReservations(reserved.reservations.map((r) => r.reservationId));
+          throw e;
+        }
+        await consumeReservations(reserved.reservations.map((r) => r.reservationId), doc._id);
         await audit(user, "order.create", "order", String(doc._id), null, { reference, total });
         return res.json(ok(await buildSnapshot(user), "Order placed"));
       }
