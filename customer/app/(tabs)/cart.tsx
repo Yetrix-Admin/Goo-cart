@@ -50,7 +50,7 @@ export default function CartScreen() {
 
   const submitCoupon = () => {
     if (!couponInput.trim()) return;
-    const result = validateCoupon(coupons, couponInput, bill.itemTotal, couponCode ?? undefined);
+    const result = validateCoupon(coupons, couponInput, restaurantId, items, couponCode ?? undefined);
     if (!result.ok) {
       setCouponError(result.message);
       return;

@@ -6,7 +6,7 @@ import { Coupon } from "@/types";
 type CatalogState = {
   coupons: Coupon[];
   loaded: boolean;
-  load: () => Promise<void>;
+  load: (force?: boolean) => Promise<void>;
 };
 
 // Coupons are small and change rarely, so they're fetched once and cached for
@@ -15,8 +15,8 @@ type CatalogState = {
 export const useCatalogStore = create<CatalogState>((set, get) => ({
   coupons: [],
   loaded: false,
-  load: async () => {
-    if (get().loaded) return;
+  load: async (force = false) => {
+    if (get().loaded && !force) return;
     try {
       set({ coupons: await fetchCoupons(), loaded: true });
     } catch {

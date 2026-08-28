@@ -134,6 +134,14 @@ catalogRouter.get("/search", async (req, res) => {
 catalogRouter.get("/coupons", async (_req, res) => {
   try {
     const rows = await Coupon.find({ active: true }).lean();
+    const restaurantIds = [...new Set(rows.flatMap((c: any) => (c.targetRestaurantIds ?? []).map(String)))];
+    const foodItemIds = [...new Set(rows.flatMap((c: any) => (c.targetFoodItemIds ?? []).map(String)))];
+    const [restaurants, foodItems] = await Promise.all([
+      restaurantIds.length ? Restaurant.find({ _id: { $in: restaurantIds } }, { name: 1 }).lean() : [],
+      foodItemIds.length ? FoodItem.find({ _id: { $in: foodItemIds } }, { name: 1 }).lean() : [],
+    ]);
+    const restaurantNames = new Map(restaurants.map((r: any) => [String(r._id), r.name]));
+    const foodItemNames = new Map(foodItems.map((f: any) => [String(f._id), f.name]));
     res.json(
       ok({
         coupons: rows.map((c: any) => ({
@@ -144,6 +152,11 @@ catalogRouter.get("/coupons", async (_req, res) => {
           value: c.value,
           minOrder: c.minOrder,
           maxDiscount: c.maxDiscount ?? null,
+          targetRestaurantIds: (c.targetRestaurantIds ?? []).map(String),
+          targetRestaurantNames: (c.targetRestaurantIds ?? []).map((id: unknown) => restaurantNames.get(String(id))).filter(Boolean),
+          targetFoodItemIds: (c.targetFoodItemIds ?? []).map(String),
+          targetFoodItemNames: (c.targetFoodItemIds ?? []).map((id: unknown) => foodItemNames.get(String(id))).filter(Boolean),
+          showOnHome: c.showOnHome !== false,
         })),
       }),
     );

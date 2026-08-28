@@ -730,7 +730,27 @@ const couponDTO = (c: any) => ({
   minOrder: c.minOrder,
   maxDiscount: c.maxDiscount ?? null,
   active: c.active,
+  targetRestaurantIds: (c.targetRestaurantIds ?? []).map(String),
+  targetFoodItemIds: (c.targetFoodItemIds ?? []).map(String),
+  showOnHome: c.showOnHome !== false,
 });
+
+async function validateCouponTargets(rawRestaurantIds: unknown, rawFoodItemIds: unknown) {
+  const targetRestaurantIds = [...new Set(Array.isArray(rawRestaurantIds) ? rawRestaurantIds.map(String).filter(Boolean) : [])];
+  const targetFoodItemIds = [...new Set(Array.isArray(rawFoodItemIds) ? rawFoodItemIds.map(String).filter(Boolean) : [])];
+
+  const restaurants = targetRestaurantIds.length ? await Restaurant.find({ _id: { $in: targetRestaurantIds } }, { _id: 1 }).lean() : [];
+  if (restaurants.length !== targetRestaurantIds.length) throw new Error("One or more selected restaurants no longer exist.");
+
+  const foods = targetFoodItemIds.length ? await FoodItem.find({ _id: { $in: targetFoodItemIds } }, { _id: 1, restaurantId: 1 }).lean() : [];
+  if (foods.length !== targetFoodItemIds.length) throw new Error("One or more selected food items no longer exist.");
+  if (foods.length && !targetRestaurantIds.length) throw new Error("Select the restaurant before selecting its food items.");
+  const restaurantSet = new Set(targetRestaurantIds);
+  if (foods.some((food: any) => !restaurantSet.has(String(food.restaurantId)))) {
+    throw new Error("Every selected food item must belong to a selected restaurant.");
+  }
+  return { targetRestaurantIds, targetFoodItemIds };
+}
 
 adminRouter.get("/coupons", async (_req, res) => {
   try {
@@ -754,6 +774,13 @@ adminRouter.post("/coupons", async (req: AuthedRequest, res) => {
     if (type === "PERCENT" && value > 100) return res.status(400).json(fail("INVALID_VALUE", "A percentage discount cannot exceed 100."));
     if (await Coupon.exists({ code })) return res.status(409).json(fail("CODE_TAKEN", "A coupon with this code already exists."));
 
+    let targets;
+    try {
+      targets = await validateCouponTargets(body.targetRestaurantIds, body.targetFoodItemIds);
+    } catch (error) {
+      return res.status(400).json(fail("INVALID_TARGETS", error instanceof Error ? error.message : "Invalid offer targets."));
+    }
+
     const coupon = await Coupon.create({
       code,
       title: body.title ?? code,
@@ -763,6 +790,8 @@ adminRouter.post("/coupons", async (req: AuthedRequest, res) => {
       minOrder: Number(body.minOrder) || 0,
       maxDiscount: body.maxDiscount !== undefined && body.maxDiscount !== null && body.maxDiscount !== "" ? Number(body.maxDiscount) : null,
       active: body.active !== false,
+      ...targets,
+      showOnHome: body.showOnHome !== false,
     });
 
     await audit(req, "coupon.create", "coupon", String(coupon._id), null, couponDTO(coupon.toObject()));
@@ -790,6 +819,19 @@ adminRouter.patch("/coupons/:id", async (req: AuthedRequest, res) => {
     if (body.minOrder !== undefined) coupon.minOrder = Number(body.minOrder) || 0;
     if (body.maxDiscount !== undefined) (coupon as any).maxDiscount = body.maxDiscount === null || body.maxDiscount === "" ? null : Number(body.maxDiscount);
     if (typeof body.active === "boolean") coupon.active = body.active;
+    if (typeof body.showOnHome === "boolean") (coupon as any).showOnHome = body.showOnHome;
+    if (body.targetRestaurantIds !== undefined || body.targetFoodItemIds !== undefined) {
+      try {
+        const targets = await validateCouponTargets(
+          body.targetRestaurantIds ?? (coupon as any).targetRestaurantIds,
+          body.targetFoodItemIds ?? (coupon as any).targetFoodItemIds,
+        );
+        (coupon as any).targetRestaurantIds = targets.targetRestaurantIds;
+        (coupon as any).targetFoodItemIds = targets.targetFoodItemIds;
+      } catch (error) {
+        return res.status(400).json(fail("INVALID_TARGETS", error instanceof Error ? error.message : "Invalid offer targets."));
+      }
+    }
 
     await coupon.save();
     await audit(req, "coupon.edit", "coupon", req.params.id, before, couponDTO(coupon.toObject()));

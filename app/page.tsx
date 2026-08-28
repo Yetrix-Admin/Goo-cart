@@ -493,10 +493,10 @@ function AdminOrderDetail({orderId}:{orderId:string}){
 }
 
 type AdminPricingSettings = { deliveryFee:number; platformFee:number; taxRatePercent:number; restaurantDiscountThreshold:number; restaurantDiscountAmount:number };
-type AdminCoupon = { id:string; code:string; title:string; description:string; type:"PERCENT"|"FLAT"|"FREE_DELIVERY"; value:number; minOrder:number; maxDiscount:number|null; active:boolean };
+type AdminCoupon = { id:string; code:string; title:string; description:string; type:"PERCENT"|"FLAT"|"FREE_DELIVERY"; value:number; minOrder:number; maxDiscount:number|null; active:boolean; targetRestaurantIds:string[]; targetFoodItemIds:string[]; showOnHome:boolean };
 
 function AdminDiscounts(){
-  return <WorkspacePage eyebrow="MONEY & PROMOTIONS" title="Discounts & Pricing" copy="Every fee, tax rate and discount code the app charges — nothing here needs a redeploy to change.">
+  return <WorkspacePage eyebrow="MONEY & PROMOTIONS" title="Discounts & Pricing" copy="Set platform pricing and create offers for all restaurants, selected restaurants, or selected food items.">
     <PricingSettingsPanel/>
     <div style={{height:28}}/>
     <CouponsPanel/>
@@ -561,7 +561,7 @@ function CouponsPanel(){
     {coupons===null?<Empty title="Loading…" copy="Fetching coupons."/>:!coupons.length?<Empty title="No coupons yet" copy="Create one above to offer customers a discount code."/>:
     <div className="directory">{coupons.map((c)=><article key={c.id}>
       <i>%</i>
-      <span><b>{c.code}</b><small>{describe(c)}{c.minOrder>0?` • min order ₹${c.minOrder}`:""}{c.title&&c.title!==c.code?` • ${c.title}`:""}</small></span>
+      <span><b>{c.code}</b><small>{describe(c)}{c.minOrder>0?` • min order ₹${c.minOrder}`:""}{c.title&&c.title!==c.code?` • ${c.title}`:""} • {c.targetFoodItemIds.length?`${c.targetFoodItemIds.length} selected food item${c.targetFoodItemIds.length===1?"":"s"}`:c.targetRestaurantIds.length?`${c.targetRestaurantIds.length} selected restaurant${c.targetRestaurantIds.length===1?"":"s"}`:"All restaurants"}{c.showOnHome?" • Shown on app home":""}</small></span>
       <span className={`status status-${c.active?"active":"suspended"}`}>● {c.active?"Active":"Inactive"}</span>
       <button className="secondary" disabled={busy} onClick={()=>void toggleActive(c)}>{c.active?"Deactivate":"Activate"}</button>
       <button className="secondary danger-text" disabled={busy} onClick={()=>void remove(c)}>Delete</button>
@@ -570,18 +570,38 @@ function CouponsPanel(){
 }
 
 function CreateCouponForm({onCreated}:{onCreated:()=>void}){
-  const [form,setForm]=useState({code:"",title:"",type:"PERCENT" as AdminCoupon["type"],value:"10",minOrder:"0",maxDiscount:""});
+  const [form,setForm]=useState({code:"",title:"",description:"",type:"PERCENT" as AdminCoupon["type"],value:"10",minOrder:"0",maxDiscount:"",targetRestaurantIds:[] as string[],targetFoodItemIds:[] as string[],showOnHome:true});
+  const [restaurants,setRestaurants]=useState<AdminRestaurant[]|null>(null);
+  const [menus,setMenus]=useState<Record<string,AdminMenuItem[]>>({});
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
+  useEffect(()=>{let cancelled=false;adminApi<{restaurants:AdminRestaurant[]}>("/restaurants").then((r)=>{if(!cancelled)setRestaurants(r.restaurants);}).catch((e)=>{if(!cancelled)setError(e instanceof Error?e.message:"Could not load restaurants");});return()=>{cancelled=true;};},[]);
+  const toggleRestaurant=async(id:string)=>{
+    if(form.targetRestaurantIds.includes(id)){
+      const removedFoodIds=new Set((menus[id]||[]).map((item)=>item.id));
+      setForm((current)=>({...current,targetRestaurantIds:current.targetRestaurantIds.filter((x)=>x!==id),targetFoodItemIds:current.targetFoodItemIds.filter((x)=>!removedFoodIds.has(x))}));
+      return;
+    }
+    setForm((current)=>({...current,targetRestaurantIds:[...current.targetRestaurantIds,id]}));
+    if(!menus[id]){
+      try{const result=await adminApi<{items:AdminMenuItem[]}>(`/restaurants/${id}/menu`);setMenus((current)=>({...current,[id]:result.items}));}
+      catch(e){setError(e instanceof Error?e.message:"Could not load this restaurant's food items");}
+    }
+  };
+  const toggleFood=(id:string)=>setForm((current)=>({...current,targetFoodItemIds:current.targetFoodItemIds.includes(id)?current.targetFoodItemIds.filter((x)=>x!==id):[...current.targetFoodItemIds,id]}));
   const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
     try{
       await adminApi("/coupons",{method:"POST",body:JSON.stringify({
         code:form.code,
         title:form.title||form.code,
+        description:form.description,
         type:form.type,
         value:form.type==="FREE_DELIVERY"?0:Number(form.value),
         minOrder:Number(form.minOrder)||0,
         maxDiscount:form.maxDiscount?Number(form.maxDiscount):null,
+        targetRestaurantIds:form.targetRestaurantIds,
+        targetFoodItemIds:form.targetFoodItemIds,
+        showOnHome:form.showOnHome,
       })});
       onCreated();
     }catch(e){setError(e instanceof Error?e.message:"Could not create this coupon");}finally{setBusy(false);}
@@ -589,6 +609,7 @@ function CreateCouponForm({onCreated}:{onCreated:()=>void}){
   return <form className="auth-form inline-form" onSubmit={(e)=>void submit(e)}>
     <label>Code<input required value={form.code} onChange={(e)=>setForm({...form,code:e.target.value.toUpperCase()})}/></label>
     <label>Title (optional)<input value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></label>
+    <label>Description (optional)<input value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})} placeholder="Short message shown to customers"/></label>
     <label>Type
       <select value={form.type} onChange={(e)=>setForm({...form,type:e.target.value as AdminCoupon["type"]})}>
         <option value="PERCENT">Percentage off</option>
@@ -599,6 +620,24 @@ function CreateCouponForm({onCreated}:{onCreated:()=>void}){
     {form.type!=="FREE_DELIVERY"&&<label>{form.type==="PERCENT"?"Percent off":"Amount off (₹)"}<input required type="number" min="1" value={form.value} onChange={(e)=>setForm({...form,value:e.target.value})}/></label>}
     <label>Minimum order (₹)<input type="number" min="0" value={form.minOrder} onChange={(e)=>setForm({...form,minOrder:e.target.value})}/></label>
     {form.type==="PERCENT"&&<label>Max discount cap (₹, optional)<input type="number" min="0" value={form.maxDiscount} onChange={(e)=>setForm({...form,maxDiscount:e.target.value})}/></label>}
+    <fieldset className="target-picker">
+      <legend>Apply offer to restaurants</legend>
+      <p>Leave every restaurant unchecked to make this a platform-wide offer.</p>
+      {restaurants===null?<small>Loading restaurants…</small>:restaurants.map((restaurant)=><label key={restaurant.id} className="checkbox-label">
+        <input type="checkbox" checked={form.targetRestaurantIds.includes(restaurant.id)} onChange={()=>void toggleRestaurant(restaurant.id)}/>
+        {restaurant.name} <small>({restaurant.area})</small>
+      </label>)}
+    </fieldset>
+    {form.targetRestaurantIds.length>0&&<fieldset className="target-picker">
+      <legend>Optional: only selected food items</legend>
+      <p>Leave all food items unchecked to apply the offer to the entire selected restaurant.</p>
+      {form.targetRestaurantIds.map((restaurantId)=>{
+        const restaurant=restaurants?.find((item)=>item.id===restaurantId);
+        const items=menus[restaurantId];
+        return <div key={restaurantId} className="food-target-group"><b>{restaurant?.name||"Restaurant"}</b>{items===undefined?<small>Loading food items…</small>:items.length===0?<small>No food items available.</small>:items.map((item)=><label key={item.id} className="checkbox-label small"><input type="checkbox" checked={form.targetFoodItemIds.includes(item.id)} onChange={()=>toggleFood(item.id)}/>{item.name} • ₹{item.price}</label>)}</div>;
+      })}
+    </fieldset>}
+    <label className="checkbox-label"><input type="checkbox" checked={form.showOnHome} onChange={(e)=>setForm({...form,showOnHome:e.target.checked})}/>Show this offer below the customer app home search bar</label>
     {error&&<p className="auth-error">{error}</p>}
     <button className="primary" disabled={busy}>{busy?"Creating…":"Create coupon"}</button>
   </form>;

@@ -83,11 +83,22 @@ async function priceLines(restaurantId: string, requested: any[]) {
   return lines;
 }
 
-async function resolveCoupon(code: string | null | undefined): Promise<CouponRule | null> {
+async function resolveCoupon(code: string | null | undefined, restaurantId: string, lines: any[]): Promise<CouponRule | null> {
   if (!code) return null;
   const c: any = await Coupon.findOne({ code: String(code).toUpperCase(), active: true }).lean();
   if (!c) throw new OrderError("INVALID_COUPON", "That coupon is not valid.", 409);
-  return { code: c.code, type: c.type, value: c.value, minOrder: c.minOrder, maxDiscount: c.maxDiscount ?? null };
+  const restaurantTargets = (c.targetRestaurantIds ?? []).map(String);
+  if (restaurantTargets.length && !restaurantTargets.includes(restaurantId)) {
+    throw new OrderError("COUPON_NOT_APPLICABLE", "This offer is not available at this restaurant.", 409);
+  }
+
+  const foodTargets = new Set((c.targetFoodItemIds ?? []).map(String));
+  const eligibleLines = foodTargets.size ? lines.filter((line) => foodTargets.has(String(line.foodItemId))) : lines;
+  if (!eligibleLines.length) {
+    throw new OrderError("COUPON_NOT_APPLICABLE", "Add an eligible food item to use this offer.", 409);
+  }
+  const eligibleSubtotal = eligibleLines.reduce((sum, line) => sum + Number(line.lineTotal || 0), 0);
+  return { code: c.code, type: c.type, value: c.value, minOrder: c.minOrder, maxDiscount: c.maxDiscount ?? null, eligibleSubtotal };
 }
 
 /** Every vendor login tied to a restaurant: the owner plus any staff. */
@@ -127,7 +138,7 @@ ordersRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
     if (!body.deliveryAddress) return res.status(400).json(fail("ADDRESS_REQUIRED", "A delivery address is required."));
 
     const lines = await priceLines(String(restaurant._id), body.items);
-    const coupon = await resolveCoupon(body.couponCode);
+    const coupon = await resolveCoupon(body.couponCode, String(restaurant._id), lines);
     const pricingSettings = await getPricingSettings();
     const bill = calculateBill(lines, coupon, Number(body.tip) || 0, pricingSettings);
 

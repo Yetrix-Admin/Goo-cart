@@ -13,18 +13,20 @@ import { colors, radius, spacing, typography } from "@/theme";
 import { Icon } from "@/components/Icon";
 import { useLocationStore } from "@/store/useLocationStore";
 import { useAuthStore } from "@/store/useAuthStore";
-import { Restaurant, ServiceType } from "@/types";
+import { useCatalogStore } from "@/store/useCatalogStore";
+import { Coupon, Restaurant, ServiceType } from "@/types";
 
 export default function HomeScreen() {
   const location = useLocationStore((s) => s.selected);
   const user = useAuthStore((s) => s.user);
+  const coupons = useCatalogStore((s) => s.coupons);
   const [popular, setPopular] = useState<Restaurant[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const list = await restaurantService.listRestaurants();
+      const [list] = await Promise.all([restaurantService.listRestaurants(), useCatalogStore.getState().load(true)]);
       setPopular(list.filter((r) => r.isOpen).slice(0, 6));
       setFailed(false);
     } catch {
@@ -87,6 +89,17 @@ export default function HomeScreen() {
 
         <SearchBar placeholder="Search dishes, groceries, stores…" editable={false} onPress={() => router.push("/(tabs)/search")} />
 
+        {coupons.some((coupon) => coupon.showOnHome !== false) && (
+          <View style={styles.offersSection}>
+            <SectionHeader title="Offers for you" subtitle="Use the code at checkout" />
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.offerScroll}>
+              {coupons.filter((coupon) => coupon.showOnHome !== false).map((coupon) => (
+                <HomeOfferCard key={coupon.code} coupon={coupon} />
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
         {/* Step 1 of the journey: pick a service. Numbered + captioned so a
             first-time user understands this is the entry point, not decoration. */}
         <View>
@@ -142,6 +155,32 @@ export default function HomeScreen() {
   );
 }
 
+function HomeOfferCard({ coupon }: { coupon: Coupon }) {
+  const discount = coupon.type === "FREE_DELIVERY" ? "FREE DELIVERY" : coupon.type === "PERCENT" ? `${coupon.value}% OFF` : `₹${coupon.value} OFF`;
+  const scope = (coupon.targetFoodItemNames ?? []).length
+    ? coupon.targetFoodItemNames.slice(0, 2).join(" • ")
+    : (coupon.targetRestaurantNames ?? []).length
+      ? coupon.targetRestaurantNames.slice(0, 2).join(" • ")
+      : "All restaurants";
+  const openOffer = () => {
+    if ((coupon.targetRestaurantIds ?? []).length === 1) {
+      router.push({ pathname: "/food/restaurant/[id]", params: { id: coupon.targetRestaurantIds[0] } });
+    } else {
+      router.push("/food");
+    }
+  };
+
+  return <Pressable style={styles.offerCard} onPress={openOffer} accessibilityRole="button" accessibilityLabel={`${discount}, code ${coupon.code}`}>
+    <View style={styles.offerBadge}><Text style={styles.offerBadgeText}>{discount}</Text></View>
+    <Text style={styles.offerTitle} numberOfLines={1}>{coupon.title || discount}</Text>
+    <Text style={styles.offerScope} numberOfLines={1}>{scope}</Text>
+    <View style={styles.offerCodeRow}>
+      <Text style={styles.offerCode}>{coupon.code}</Text>
+      <Text style={styles.offerAction}>VIEW →</Text>
+    </View>
+  </Pressable>;
+}
+
 function getGreeting(): string {
   const hour = new Date().getHours();
   if (hour < 12) return "GOOD MORNING";
@@ -177,6 +216,16 @@ const styles = StyleSheet.create({
   stepNumber: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center" },
   stepNumberText: { color: colors.white, fontSize: 12, fontWeight: "800" },
   serviceGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  offersSection: { marginTop: -spacing.sm },
+  offerScroll: { gap: spacing.md, paddingRight: spacing.xl },
+  offerCard: { width: 238, backgroundColor: "#FFF1EB", borderWidth: 1, borderColor: "#FFD2C2", borderRadius: radius.lg, padding: spacing.lg, gap: 5 },
+  offerBadge: { alignSelf: "flex-start", backgroundColor: colors.primary, borderRadius: radius.sm, paddingHorizontal: 9, paddingVertical: 5 },
+  offerBadgeText: { color: colors.white, fontSize: 11, fontWeight: "900", letterSpacing: 0.5 },
+  offerTitle: { ...typography.bodyStrong, marginTop: 3 },
+  offerScope: { ...typography.caption, color: colors.muted },
+  offerCodeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.sm },
+  offerCode: { color: colors.primary, fontWeight: "900", letterSpacing: 1 },
+  offerAction: { color: colors.dark, fontSize: 10, fontWeight: "800" },
   promo: { backgroundColor: colors.dark, borderRadius: radius.xl, padding: spacing.xl, flexDirection: "row" },
   promoEyebrow: { color: "#FF9D7A", fontSize: 9, fontWeight: "800", letterSpacing: 1.4 },
   promoTitle: { color: colors.white, fontSize: 26, fontWeight: "700", lineHeight: 30, marginTop: spacing.sm },

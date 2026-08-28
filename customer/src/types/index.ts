@@ -132,6 +132,11 @@ export type Coupon = {
   value: number;
   minOrder: number;
   maxDiscount?: number | null;
+  targetRestaurantIds: string[];
+  targetRestaurantNames: string[];
+  targetFoodItemIds: string[];
+  targetFoodItemNames: string[];
+  showOnHome: boolean;
 };
 
 // --- Pricing ----------------------------------------------------------

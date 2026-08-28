@@ -26,6 +26,7 @@ export type CouponRule = {
   value: number;
   minOrder: number;
   maxDiscount: number | null;
+  eligibleSubtotal?: number;
 };
 
 export type PricedLine = { unitPrice: number; quantity: number; lineTotal: number };
@@ -46,14 +47,15 @@ export function calculateBill(lines: PricedLine[], coupon: CouponRule | null, ti
   const restaurantDiscount = itemTotal >= settings.restaurantDiscountThreshold ? settings.restaurantDiscountAmount : 0;
   const afterRestaurantDiscount = itemTotal - restaurantDiscount;
 
-  const couponApplies = coupon !== null && afterRestaurantDiscount >= coupon.minOrder;
+  const discountBase = coupon ? Math.min(afterRestaurantDiscount, coupon.eligibleSubtotal ?? afterRestaurantDiscount) : 0;
+  const couponApplies = coupon !== null && discountBase >= coupon.minOrder;
   const freeDelivery = couponApplies && coupon!.type === "FREE_DELIVERY";
 
   let couponDiscount = 0;
   if (couponApplies && coupon!.type === "FLAT") {
-    couponDiscount = Math.min(coupon!.value, afterRestaurantDiscount);
+    couponDiscount = Math.min(coupon!.value, discountBase);
   } else if (couponApplies && coupon!.type === "PERCENT") {
-    const raw = (afterRestaurantDiscount * coupon!.value) / 100;
+    const raw = (discountBase * coupon!.value) / 100;
     couponDiscount = Math.round(coupon!.maxDiscount ? Math.min(raw, coupon!.maxDiscount) : raw);
   }
 

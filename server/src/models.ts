@@ -208,6 +208,12 @@ const couponSchema = new Schema(
     minOrder: { type: Number, default: 0 },
     maxDiscount: { type: Number, default: null },
     active: { type: Boolean, default: true },
+    // Empty targets mean platform-wide. When restaurants are selected the
+    // coupon only works for orders from those restaurants; selected food
+    // items narrow the discounted subtotal even further.
+    targetRestaurantIds: { type: [Schema.Types.ObjectId], ref: "Restaurant", default: [] },
+    targetFoodItemIds: { type: [Schema.Types.ObjectId], ref: "FoodItem", default: [] },
+    showOnHome: { type: Boolean, default: true },
   },
   opts,
 );

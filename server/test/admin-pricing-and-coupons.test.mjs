@@ -58,16 +58,17 @@ test("admin controls platform pricing, restaurant offers, and coupons end to end
     categories: [{ key: "mains", name: "Mains", sortOrder: 1 }],
   });
   const item = await FoodItem.create({ slug: "pricing-meal", restaurantId: restaurant._id, categoryKey: "mains", name: "Pricing Meal", price: 100, veg: true, available: true });
+  const otherItem = await FoodItem.create({ slug: "pricing-side", restaurantId: restaurant._id, categoryKey: "mains", name: "Pricing Side", price: 100, veg: true, available: true });
 
-  async function placeOrder(couponCode) {
+  async function placeOrder(couponCode, selectedItems = [{ foodItemId: String(item._id), quantity: 1, addonIds: [] }], selectedRestaurant = restaurant) {
     return request("/api/v1/orders", {
       token: customer.token,
       method: "POST",
       body: {
-        restaurantId: String(restaurant._id),
+        restaurantId: String(selectedRestaurant._id),
         paymentMethod: "COD",
         deliveryAddress: { label: "Home", line1: "1 Pricing Street", city: "Pricing City", pincode: "500001" },
-        items: [{ foodItemId: String(item._id), quantity: 1, addonIds: [] }],
+        items: selectedItems,
         couponCode,
       },
     });
@@ -109,6 +110,45 @@ test("admin controls platform pricing, restaurant offers, and coupons end to end
   const withCoupon = await placeOrder("ADMIN20");
   assert.equal(withCoupon.status, 200, JSON.stringify(withCoupon.json));
   assert.equal(withCoupon.json.data.order.bill.couponDiscount, 20, "20% off a ₹100 item is ₹20");
+
+  // A targeted home offer discounts only the selected food subtotal and is
+  // rejected at every other restaurant by the authoritative order API.
+  const targetedCreate = await request("/api/v1/admin/coupons", {
+    token: admin.token,
+    method: "POST",
+    body: {
+      code: "MEAL50",
+      title: "Half price meal",
+      type: "PERCENT",
+      value: 50,
+      targetRestaurantIds: [String(restaurant._id)],
+      targetFoodItemIds: [String(item._id)],
+      showOnHome: true,
+    },
+  });
+  assert.equal(targetedCreate.status, 200, JSON.stringify(targetedCreate.json));
+  const targetedOrder = await placeOrder("MEAL50", [
+    { foodItemId: String(item._id), quantity: 1, addonIds: [] },
+    { foodItemId: String(otherItem._id), quantity: 1, addonIds: [] },
+  ]);
+  assert.equal(targetedOrder.status, 200, JSON.stringify(targetedOrder.json));
+  assert.equal(targetedOrder.json.data.order.bill.couponDiscount, 50, "only the selected ₹100 meal should receive 50% off");
+
+  const publicOffers = await request("/api/v1/catalog/coupons");
+  const mealOffer = publicOffers.json.data.coupons.find((coupon) => coupon.code === "MEAL50");
+  assert.deepEqual(mealOffer.targetRestaurantNames, ["Pricing Kitchen"]);
+  assert.deepEqual(mealOffer.targetFoodItemNames, ["Pricing Meal"]);
+  assert.equal(mealOffer.showOnHome, true);
+
+  const otherRestaurant = await Restaurant.create({
+    slug: "other-kitchen", name: "Other Kitchen", area: "Test Area", isOpen: true,
+    latitude: 17.4363, longitude: 81.2662, manualOrderAcceptance: false,
+    categories: [{ key: "mains", name: "Mains", sortOrder: 1 }],
+  });
+  const otherRestaurantItem = await FoodItem.create({ slug: "other-meal", restaurantId: otherRestaurant._id, categoryKey: "mains", name: "Other Meal", price: 100, veg: true, available: true });
+  const wrongRestaurant = await placeOrder("MEAL50", [{ foodItemId: String(otherRestaurantItem._id), quantity: 1, addonIds: [] }], otherRestaurant);
+  assert.equal(wrongRestaurant.status, 409);
+  assert.equal(wrongRestaurant.json.error.code, "COUPON_NOT_APPLICABLE");
 
   // Deactivating the coupon must take effect immediately too.
   const couponId = couponCreate.json.data.coupon.id;
