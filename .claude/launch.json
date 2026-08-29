@@ -9,6 +9,16 @@
         "dev"
       ],
       "port": 3000
+    },
+    {
+      "name": "customer-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "web"
+      ],
+      "cwd": "customer",
+      "port": 8081
     }
   ]
 }
