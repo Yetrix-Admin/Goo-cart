@@ -26,9 +26,12 @@ export async function createFoodItem(restaurant: any, body: any) {
   const price = Number(body?.price);
   const categoryKey = String(body?.categoryKey ?? "").trim();
 
+  const discountPercent = body?.discountPercent !== undefined ? Number(body.discountPercent) : 0;
+
   if (name.length < 2) throw new MenuItemError("INVALID_NAME", "Enter a dish name.");
   if (!Number.isFinite(price) || price <= 0) throw new MenuItemError("INVALID_PRICE", "Enter a valid price.");
   if (!categoryKey) throw new MenuItemError("INVALID_CATEGORY", "Choose a menu category.");
+  if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) throw new MenuItemError("INVALID_DISCOUNT", "Discount must be between 0 and 100.");
 
   // A restaurant with no categories yet (freshly created by admin) gets one
   // seeded automatically rather than rejecting the first item added to it.
@@ -46,7 +49,9 @@ export async function createFoodItem(restaurant: any, body: any) {
     categoryKey,
     name,
     description,
+    imageUrl: body?.imageUrl || null,
     price,
+    discountPercent,
     veg: Boolean(body?.veg),
     available: true,
   });
@@ -66,6 +71,12 @@ export async function updateFoodItem(item: any, body: any) {
   }
   if (typeof body.veg === "boolean") item.veg = body.veg;
   if (typeof body.available === "boolean") item.available = body.available;
+  if (body.imageUrl !== undefined) item.imageUrl = body.imageUrl || null;
+  if (body.discountPercent !== undefined) {
+    const discountPercent = Number(body.discountPercent);
+    if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) throw new MenuItemError("INVALID_DISCOUNT", "Discount must be between 0 and 100.");
+    item.discountPercent = discountPercent;
+  }
 
   await item.save();
   return item;

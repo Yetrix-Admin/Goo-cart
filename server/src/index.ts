@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import http from "node:http";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
 import { connectDb, dbName } from "./lib/db.js";
 import { attachUser } from "./lib/auth.js";
 import { authRouter } from "./routes/auth.js";
@@ -28,6 +29,10 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 app.set("trust proxy", 1);
 
+// Standard security headers (HSTS, no-sniff, frame-deny, etc.) for a
+// JSON-only API. CSP is irrelevant here since no HTML is served.
+app.use(helmet({ contentSecurityPolicy: false }));
+
 // Browsers are restricted to the configured origins; native apps send no
 // Origin header and are unaffected. In production, ALLOWED_ORIGINS must be
 // explicit for browser clients because credentials are enabled.
@@ -37,7 +42,10 @@ app.use(
     origin: corsOrigin,
   }),
 );
-app.use(express.json({ limit: "1mb" }));
+// 6mb accommodates a single base64-encoded photo (shop/menu-item/partner
+// images are compressed client-side before upload); everything else on this
+// API is small JSON.
+app.use(express.json({ limit: "6mb" }));
 
 // Serverless platforms start a fresh process per cold start, so the database
 // connection is established on demand rather than once at boot. connectDb()

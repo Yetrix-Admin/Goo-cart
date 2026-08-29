@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { Coupon, FoodItem, Restaurant } from "../models.js";
-import { ok, fail } from "../lib/http.js";
+import { ok, fail, escapeRegex } from "../lib/http.js";
 import { getPricingSettings } from "../lib/pricingSettings.js";
 
 export const catalogRouter = Router();
@@ -23,6 +23,7 @@ function toRestaurantDTO(r: any) {
     vegOnly: r.vegOnly,
     isOpen: r.isOpen,
     area: r.area,
+    address: r.address ?? "",
     latitude: r.latitude,
     longitude: r.longitude,
     offers: (r.offers ?? []).map((o: any) => ({ id: String(o._id), title: o.title, description: o.description ?? null })),
@@ -45,6 +46,7 @@ function toFoodItemDTO(f: any) {
     description: f.description,
     imageUrl: f.imageUrl,
     price: f.price,
+    discountPercent: f.discountPercent || 0,
     veg: f.veg,
     rating: f.rating || null,
     ratingCount: f.ratingCount || null,
@@ -67,11 +69,11 @@ catalogRouter.get("/restaurants", async (req, res) => {
     const q = String(req.query.q ?? "").trim();
     const filter: Record<string, unknown> = {};
 
-    if (q) filter.$or = [{ name: { $regex: q, $options: "i" } }, { cuisines: { $regex: q, $options: "i" } }];
+    if (q) filter.$or = [{ name: { $regex: escapeRegex(q), $options: "i" } }, { cuisines: { $regex: escapeRegex(q), $options: "i" } }];
     if (req.query.minRating) filter.rating = { $gte: Number(req.query.minRating) };
     if (req.query.maxDeliveryMinutes) filter.deliveryTimeMax = { $lte: Number(req.query.maxDeliveryMinutes) };
     if (req.query.vegOnly === "true") filter.vegOnly = true;
-    if (req.query.cuisine) filter.cuisines = { $regex: String(req.query.cuisine), $options: "i" };
+    if (req.query.cuisine) filter.cuisines = { $regex: escapeRegex(String(req.query.cuisine)), $options: "i" };
     if (req.query.withOffers === "true") filter["offers.0"] = { $exists: true };
 
     const rows = await Restaurant.find(filter).sort({ isOpen: -1, rating: -1 }).lean();
@@ -104,10 +106,10 @@ catalogRouter.get("/search", async (req, res) => {
     if (!q) return res.json(ok({ restaurants: [], items: [] }));
 
     const [restaurants, items] = await Promise.all([
-      Restaurant.find({ $or: [{ name: { $regex: q, $options: "i" } }, { cuisines: { $regex: q, $options: "i" } }] })
+      Restaurant.find({ $or: [{ name: { $regex: escapeRegex(q), $options: "i" } }, { cuisines: { $regex: escapeRegex(q), $options: "i" } }] })
         .sort({ rating: -1 })
         .lean(),
-      FoodItem.find({ name: { $regex: q, $options: "i" } }).sort({ bestseller: -1 }).limit(40).lean(),
+      FoodItem.find({ name: { $regex: escapeRegex(q), $options: "i" } }).sort({ bestseller: -1 }).limit(40).lean(),
     ]);
 
     // One lookup for the restaurant names the matched dishes belong to.

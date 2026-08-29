@@ -20,6 +20,10 @@ const SENSITIVE_KEY_PATTERNS = [
   /paymentCredential/i,
   /refresh/i,
   /access/i,
+  /aadhaar/i,
+  /^panNumber$/i,
+  /imageUrl/i,
+  /photoUrl/i,
 ];
 
 type AuditActor = { _id?: unknown; role?: string | null } | null | undefined;

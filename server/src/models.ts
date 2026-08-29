@@ -7,7 +7,7 @@ import mongoose, { Schema, model, InferSchemaType } from "mongoose";
 // queried on their own — users, sessions, restaurants, food items, orders —
 // stay as top-level collections.
 
-const opts = { timestamps: true, versionKey: false };
+const opts = { timestamps: true, versionKey: false } as const;
 
 // --- Identity -------------------------------------------------------------
 
@@ -69,6 +69,8 @@ const userSchema = new Schema(
     vehicleNumber: { type: String, default: null },
     licenceNumber: { type: String, default: null },
     rcNumber: { type: String, default: null },
+    aadhaarNumber: { type: String, default: null },
+    panNumber: { type: String, default: null },
     bankDetails: { type: Schema.Types.Mixed, default: null },
     photoUrl: { type: String, default: null },
     partnerApprovalStatus: { type: String, default: "APPROVED" }, // PENDING | APPROVED | REJECTED
@@ -152,10 +154,14 @@ const restaurantSchema = new Schema(
     categories: { type: [categorySchema], default: [] },
 
     // Business details an admin captures when onboarding a vendor.
+    address: { type: String, default: "" },
     businessType: { type: String, default: null },
     gst: { type: String, default: null },
     pan: { type: String, default: null },
     bankDetails: { type: Schema.Types.Mixed, default: null },
+    // Per-vendor commission override, as a percent (0-100). null = use the
+    // platform-wide default from pricing settings.
+    commissionPercent: { type: Number, default: null },
     openingTime: { type: String, default: null },
     closingTime: { type: String, default: null },
     serviceRadiusKm: { type: Number, default: 8 },
@@ -204,6 +210,7 @@ const foodItemSchema = new Schema(
     ratingCount: { type: Number, default: 0 },
     bestseller: { type: Boolean, default: false },
     available: { type: Boolean, default: true },
+    discountPercent: { type: Number, default: 0 },
     variants: { type: [variantSchema], default: [] },
     addonGroups: { type: [addonGroupSchema], default: [] },
   },
@@ -383,6 +390,8 @@ const deviceTokenSchema = new Schema(
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     token: { type: String, required: true, unique: true },
     platform: { type: String, default: "unknown" }, // ios | android | web
+    appType: { type: String, enum: ["customer", "vendor", "partner"], required: true },
+    active: { type: Boolean, default: true },
   },
   opts,
 );

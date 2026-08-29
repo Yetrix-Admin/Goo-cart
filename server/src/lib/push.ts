@@ -18,19 +18,29 @@ export async function notifyUser(userId: unknown, title: string, body: string, d
   }
 
   try {
-    const tokens = await DeviceToken.find({ userId }).lean();
+    const tokens = await DeviceToken.find({ userId, active: { $ne: false } }).lean();
     const messages: ExpoPushMessage[] = [];
+    const tokenValues: string[] = [];
     for (const t of tokens) {
       if (!Expo.isExpoPushToken(t.token)) continue;
       messages.push({ to: t.token, sound: "default", title, body, data });
+      tokenValues.push(t.token);
     }
     if (!messages.length) return;
 
     const chunks = expo.chunkPushNotifications(messages);
+    let i = 0;
     for (const chunk of chunks) {
       const receipts = await expo.sendPushNotificationsAsync(chunk);
       for (const receipt of receipts) {
-        if (receipt.status === "error") console.error("Expo push error:", receipt.message, receipt.details);
+        const failedToken = tokenValues[i++];
+        if (receipt.status !== "error") continue;
+        console.error("Expo push error:", receipt.message, receipt.details);
+        // DeviceNotRegistered means the app was uninstalled or the token
+        // was rotated — deactivate it so future sends stop retrying it.
+        if (receipt.details?.error === "DeviceNotRegistered" && failedToken) {
+          await DeviceToken.updateOne({ token: failedToken }, { $set: { active: false } });
+        }
       }
     }
   } catch (e) {
