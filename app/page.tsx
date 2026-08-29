@@ -25,6 +25,65 @@ function Brand(){ return <div className="brand"><Image src="/goocart-logo.png" a
 function Status({value}:{value:string}){ return <span className={`status status-${value.toLowerCase()}`}>● {label(value)}</span>; }
 function Empty({title,copy}:{title:string;copy:string}){ return <div className="empty-state"><i>g</i><h3>{title}</h3><p>{copy}</p></div>; }
 
+function EyeIcon(){return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>;}
+function EyeOffIcon(){return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a20.3 20.3 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a20.28 20.28 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>;}
+
+function PasswordField({label:fieldLabel,value,onChange,minLength=8}:{label:string;value:string;onChange:(value:string)=>void;minLength?:number}){
+  const [visible,setVisible]=useState(false);
+  return <label>{fieldLabel}<div className="password-field">
+    <input required minLength={minLength} type={visible?"text":"password"} value={value} onChange={(e)=>onChange(e.target.value)}/>
+    <button type="button" className="password-toggle" onClick={()=>setVisible(!visible)} aria-label={visible?"Hide password":"Show password"}>{visible?<EyeOffIcon/>:<EyeIcon/>}</button>
+  </div></label>;
+}
+
+// Downscales + JPEG-compresses an uploaded image in the browser before it
+// ever leaves the device, so a phone photo doesn't blow past the server's
+// request body limit — images are stored as base64 directly in MongoDB
+// (no external image host wired up), so keeping them small matters.
+function compressImageFile(file: File, maxDimension = 900, quality = 0.72): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read this file."));
+    reader.onload = () => {
+      const img = new window.Image();
+      img.onerror = () => reject(new Error("Could not read this image."));
+      img.onload = () => {
+        const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("Image compression is not supported in this browser."));
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function ImageUploadField({label:fieldLabel,value,onChange}:{label:string;value:string;onChange:(value:string)=>void}){
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const pick=async(e:React.ChangeEvent<HTMLInputElement>)=>{
+    const file=e.target.files?.[0];
+    e.target.value="";
+    if(!file)return;
+    setBusy(true);setError("");
+    try{onChange(await compressImageFile(file));}
+    catch(err){setError(err instanceof Error?err.message:"Could not process this image.");}
+    finally{setBusy(false);}
+  };
+  return <label>{fieldLabel}<div className="image-upload-field">
+    {value?<img src={value} alt="" className="image-upload-preview"/>:<div className="image-upload-preview image-upload-empty">No image</div>}
+    <div className="image-upload-controls">
+      <input type="file" accept="image/*" onChange={(e)=>void pick(e)} disabled={busy}/>
+      {value&&<button type="button" className="secondary" onClick={()=>onChange("")}>Remove</button>}
+    </div>
+  </div>{busy&&<small className="muted-note">Processing image…</small>}{error&&<p className="auth-error">{error}</p>}</label>;
+}
+
 function useGoocart(){
   const [state,setState] = useState<Snapshot|null>(null); const [busy,setBusy] = useState(false); const [toast,setToast] = useState(""); const [error,setError] = useState<ErrorState|null>(null);
   const load = useCallback(async(silent=false)=>{ try{ if(!silent)setBusy(true); const res=await fetch("/api/goocart",{cache:"no-store"}); const json=await res.json() as ApiResult; if(!json.success||!json.data){setError({code:json.error?.code||"UNKNOWN",message:json.error?.message||"Unable to load Goocart"});return;} setState(json.data);setError(null); }catch(e){setError({code:"NETWORK_ERROR",message:e instanceof Error?e.message:"Unable to load Goocart"});}finally{if(!silent)setBusy(false);}},[]);
@@ -51,7 +110,7 @@ function AuthGate({onAuthenticated}:{onAuthenticated:()=>void}){
     <form className="auth-form" onSubmit={(e)=>void submitPassword(e)}>
       {isSignup&&<label>Full name<input required minLength={2} value={name} onChange={(e)=>setName(e.target.value)}/></label>}
       <label>Email<input required type="email" value={email} onChange={(e)=>setEmail(e.target.value)}/></label>
-      <label>Password<input required minLength={8} type="password" value={password} onChange={(e)=>setPassword(e.target.value)}/></label>
+      <PasswordField label="Password" value={password} onChange={setPassword}/>
       {error&&<p className="auth-error">{error}</p>}
       <button className="primary" disabled={busy}>{busy?"Please wait...":isSignup?"Create account":"Sign in"}</button>
     </form>
@@ -167,8 +226,8 @@ function AdminAutomation(){
   </WorkspacePage>;
 }
 
-type AdminRestaurant = { id:string; name:string; area:string; isOpen:boolean; status:string; manualOrderAcceptance:boolean; autoAcceptanceMode:"MANUAL"|"AUTOMATIC"|"SMART_AUTOMATIC"; temporaryBusyMode:boolean; maxSimultaneousOrders:number; averagePreparationMinutes:number; maximumQueue:number; owner:{id:string;name:string;email:string}|null; offers:{id:string;title:string;description:string|null}[] };
-type AdminVendorUser = { id:string; name:string; email:string; role:string; status:string };
+type AdminRestaurant = { id:string; name:string; imageUrl:string|null; area:string; address:string; latitude:number; longitude:number; isOpen:boolean; status:string; rating:number; ratingCount:number; commissionPercent:number|null; effectiveCommissionPercent:number; totalOrders:number; totalOrderValue:number; commissionPayout:number; manualOrderAcceptance:boolean; autoAcceptanceMode:"MANUAL"|"AUTOMATIC"|"SMART_AUTOMATIC"; temporaryBusyMode:boolean; maxSimultaneousOrders:number; averagePreparationMinutes:number; maximumQueue:number; owner:{id:string;name:string;email:string;username:string|null}|null; offers:{id:string;title:string;description:string|null}[] };
+type AdminVendorUser = { id:string; name:string; email:string; username?:string|null; role:string; status:string };
 type AdminVendorTeamMember = { id:string; name:string; email:string; phone:string|null; role:string; status:string; staffTitle:string|null; isPrimaryOwner:boolean; permissions:string[] };
 async function adminApi<T>(path:string,init?:RequestInit):Promise<T>{const res=await fetch(`/api/v1/admin${path}`,{...init,headers:{"content-type":"application/json",...init?.headers}});const json=await res.json() as {success:boolean;data?:T;error?:{message:string}};if(!json.success||!json.data)throw new Error(json.error?.message||"Request failed");return json.data;}
 
@@ -180,21 +239,25 @@ function AdminVendors(){
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const [showCreate,setShowCreate]=useState(false);
+  const [editing,setEditing]=useState<string|null>(null);
   const [expanded,setExpanded]=useState<string|null>(null);
   const [expandedOffers,setExpandedOffers]=useState<string|null>(null);
-  const [expandedMenu,setExpandedMenu]=useState<string|null>(null);
   const [expandedAutomation,setExpandedAutomation]=useState<string|null>(null);
+  const [menuFor,setMenuFor]=useState<AdminRestaurant|null>(null);
   const load=useCallback(async()=>{try{const [r,v]=await Promise.all([adminApi<{restaurants:AdminRestaurant[]}>("/restaurants"),adminApi<{vendors:AdminVendorUser[]}>("/vendors")]);setRestaurants(r.restaurants);setVendors(v.vendors);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load vendors");}},[]);
   useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
   const assign=async(restaurantId:string,userId:string)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/owner`,{method:"PATCH",body:JSON.stringify({userId:userId||null})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not assign owner");}finally{setBusy(false);}};
   const toggleManual=async(r:AdminRestaurant)=>{setBusy(true);try{await adminApi(`/restaurants/${r.id}/manual-acceptance`,{method:"PATCH",body:JSON.stringify({manualOrderAcceptance:!r.manualOrderAcceptance})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update this vendor's setting");}finally{setBusy(false);}};
+  const remove=async(r:AdminRestaurant)=>{if(!confirm(`Delete "${r.name}"? Vendors with order history are disabled instead of permanently deleted.`))return;setBusy(true);try{const res=await adminApi<{deleted:boolean;disabled?:boolean}>(`/restaurants/${r.id}`,{method:"DELETE"});await load();if(res.disabled)alert(`"${r.name}" has order history, so it was disabled instead of deleted.`);}catch(e){setError(e instanceof Error?e.message:"Could not delete this vendor");}finally{setBusy(false);}};
+
+  if(menuFor)return <VendorMenuGrid restaurant={menuFor} onBack={()=>setMenuFor(null)}/>;
 
   return <WorkspacePage eyebrow="VENDOR ACCOUNTS" title="Restaurants & owners" copy="Create vendors, link owners, control order acceptance, and manage each vendor's Vendor App team.">
     {error&&<p className="auth-error">{error}</p>}
     <FlowSteps steps={[
-      ["1","Create vendor","Add restaurant details and create the owner login credentials."],
+      ["1","Create vendor","Add restaurant details, a photo and the owner login credentials."],
       ["2","Set automation","Choose manual, auto, or smart auto-accept with kitchen capacity."],
-      ["3","Add menu & offers","Create live dishes, prices, availability and restaurant banners."],
+      ["3","Add menu & offers","Create live dishes with photos and prices, and percentage offers."],
       ["4","Manage team","Add managers or staff and give only the permissions they need."],
     ]}/>
     <PrimaryActionButton label={showCreate?"Cancel":"+ Create Vendor"} onClick={()=>setShowCreate(!showCreate)}/>
@@ -202,27 +265,35 @@ function AdminVendors(){
     {restaurants===null?<Empty title="Loading…" copy="Fetching restaurants and vendor accounts."/>:!restaurants.length?<Empty title="No restaurants yet" copy="Create one above, or seed the catalog to see restaurants here."/>:
     <div className="directory">{restaurants.map((r)=><article key={r.id} className="vendor-row">
       <div className="vendor-row-head">
-        <i>{r.name[0]}</i>
-        <span><b>{r.name}</b><small>{r.area} • {r.isOpen?"Open":"Closed"} • {r.status} • {label(r.autoAcceptanceMode)}{r.temporaryBusyMode?" • Busy mode":""}{r.owner?` • Owned by ${r.owner.name}`:" • Unassigned"}</small></span>
+        {r.imageUrl?<img src={r.imageUrl} alt="" className="vendor-thumb"/>:<i>{r.name[0]}</i>}
+        <span><b>{r.name}</b><small>Vendor ID {r.id}{r.owner?.username?` • @${r.owner.username}`:""} • {r.area} • {r.isOpen?"Open":"Closed"} • {r.status} • {label(r.autoAcceptanceMode)}{r.temporaryBusyMode?" • Busy mode":""}{r.owner?` • Owned by ${r.owner.name}`:" • Unassigned"}</small></span>
         <button className="toggle-labelled" onClick={()=>void toggleManual(r)} disabled={busy} title="Require Vendor Order Acceptance">
           <span className={r.manualOrderAcceptance?"toggle on":"toggle"}><i/></span>
           <small>{r.manualOrderAcceptance?"Manual accept ON":"Auto-accept ON"}</small>
         </button>
+      </div>
+      <div className="vendor-stats">
+        <span><b>{r.totalOrders}</b><small>Successful orders</small></span>
+        <span><b>{money(r.totalOrderValue)}</b><small>Order value</small></span>
+        <span><b>{money(r.commissionPayout)}</b><small>Commission ({r.effectiveCommissionPercent}%)</small></span>
+        <span><b>★ {(r.rating||0).toFixed(1)}</b><small>{r.ratingCount} ratings</small></span>
       </div>
       <div className="vendor-row-actions">
         <select disabled={busy} value={r.owner?.id||""} onChange={(e)=>void assign(r.id,e.target.value)} aria-label={`Assign owner for ${r.name}`}>
           <option value="">Unassigned</option>
           {vendors.map((v)=><option key={v.id} value={v.id}>{v.name} ({v.email})</option>)}
         </select>
-        <button className="secondary" onClick={()=>setExpanded(expanded===r.id?null:r.id)}>{expanded===r.id?"Hide team":"Manage team"}</button>
+        <button className="secondary" onClick={()=>setEditing(editing===r.id?null:r.id)}>{editing===r.id?"Cancel edit":"Edit vendor"}</button>
+        <button className="secondary" onClick={()=>setMenuFor(r)}>Menu</button>
+        <button className="secondary" onClick={()=>setExpandedOffers(expandedOffers===r.id?null:r.id)}>{expandedOffers===r.id?"Hide offers":"Offers (%)"}</button>
+        <button className="secondary" onClick={()=>setExpanded(expanded===r.id?null:r.id)}>{expanded===r.id?"Hide team":"Team"}</button>
         <button className="secondary" onClick={()=>setExpandedAutomation(expandedAutomation===r.id?null:r.id)}>{expandedAutomation===r.id?"Hide automation":"Automation"}</button>
-        <button className="secondary" onClick={()=>setExpandedOffers(expandedOffers===r.id?null:r.id)}>{expandedOffers===r.id?"Hide offers":`Manage offers (${r.offers.length})`}</button>
-        <button className="secondary" onClick={()=>setExpandedMenu(expandedMenu===r.id?null:r.id)}>{expandedMenu===r.id?"Hide menu":"Manage menu"}</button>
+        <button className="secondary danger-text" disabled={busy} onClick={()=>void remove(r)}>Delete</button>
       </div>
+      {editing===r.id&&<EditVendorForm restaurant={r} onSaved={()=>{setEditing(null);void load();}}/>}
       {expanded===r.id&&<VendorTeamPanel restaurantId={r.id}/>}
       {expandedAutomation===r.id&&<RestaurantAutomationPanel restaurant={r} onChange={load}/>}
-      {expandedOffers===r.id&&<VendorOffersPanel restaurantId={r.id} offers={r.offers} onChange={load}/>}
-      {expandedMenu===r.id&&<VendorMenuPanel restaurantId={r.id}/>}
+      {expandedOffers===r.id&&<VendorPercentOffersPanel restaurantId={r.id}/>}
     </article>)}</div>}
   </WorkspacePage>;
 }
@@ -232,28 +303,62 @@ function PrimaryActionButton({label,onClick}:{label:string;onClick:()=>void}){re
 function FlowSteps({steps}:{steps:[string,string,string][]}){return <div className="flow-steps">{steps.map((step)=><article key={step[0]}><i>{step[0]}</i><span><b>{step[1]}</b><small>{step[2]}</small></span></article>)}</div>;}
 
 function CreateVendorForm({onCreated}:{onCreated:()=>void}){
-  const [form,setForm]=useState({name:"",area:"",latitude:"",longitude:"",businessType:"",ownerName:"",ownerEmail:"",ownerPhone:"",initialPassword:"",manualOrderAcceptance:true});
+  const [form,setForm]=useState({name:"",imageUrl:"",area:"",address:"",latitude:"",longitude:"",businessType:"",commissionPercent:"",ownerName:"",ownerUsername:"",ownerEmail:"",ownerPhone:"",initialPassword:"",manualOrderAcceptance:true});
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
+  const [created,setCreated]=useState<{name:string;vendorId:string;username:string;email:string;password:string}|null>(null);
   const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
     try{
-      await adminApi("/restaurants",{method:"POST",body:JSON.stringify({name:form.name,area:form.area,latitude:Number(form.latitude),longitude:Number(form.longitude),businessType:form.businessType||null,ownerName:form.ownerName,ownerEmail:form.ownerEmail,ownerPhone:form.ownerPhone||undefined,initialPassword:form.initialPassword,manualOrderAcceptance:form.manualOrderAcceptance})});
+      const res=await adminApi<{restaurant:{id:string}}>("/restaurants",{method:"POST",body:JSON.stringify({name:form.name,imageUrl:form.imageUrl||null,area:form.area,address:form.address,latitude:Number(form.latitude),longitude:Number(form.longitude),businessType:form.businessType||null,commissionPercent:form.commissionPercent===""?null:Number(form.commissionPercent),ownerName:form.ownerName,ownerUsername:form.ownerUsername||undefined,ownerEmail:form.ownerEmail,ownerPhone:form.ownerPhone||undefined,initialPassword:form.initialPassword,manualOrderAcceptance:form.manualOrderAcceptance})});
+      setCreated({name:form.name,vendorId:res.restaurant.id,username:form.ownerUsername,email:form.ownerEmail,password:form.initialPassword});
       onCreated();
     }catch(e){setError(e instanceof Error?e.message:"Could not create vendor");}finally{setBusy(false);}
   };
+  if(created)return <div className="auth-form inline-form">
+    <p><b>{created.name}</b> was created.</p>
+    <p className="muted-note">Vendor ID: <b>{created.vendorId}</b>{created.username?<> • Username: <b>{created.username}</b></>:null}<br/>Login email: <b>{created.email}</b> • Temporary password: <b>{created.password}</b><br/>A welcome email with these credentials was sent to the vendor (delivery depends on email being configured on this server).</p>
+  </div>;
   return <form className="auth-form inline-form" onSubmit={(e)=>void submit(e)}>
-    <label>Business name<input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></label>
+    <ImageUploadField label="Shop / restaurant photo" value={form.imageUrl} onChange={(imageUrl)=>setForm({...form,imageUrl})}/>
+    <label>Business (shop / restaurant) name<input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></label>
+    <label>Address<input required value={form.address} onChange={(e)=>setForm({...form,address:e.target.value})}/></label>
     <label>Area<input required value={form.area} onChange={(e)=>setForm({...form,area:e.target.value})}/></label>
     <label>Latitude<input required type="number" step="any" value={form.latitude} onChange={(e)=>setForm({...form,latitude:e.target.value})}/></label>
     <label>Longitude<input required type="number" step="any" value={form.longitude} onChange={(e)=>setForm({...form,longitude:e.target.value})}/></label>
     <label>Business type<input value={form.businessType} onChange={(e)=>setForm({...form,businessType:e.target.value})}/></label>
+    <label>Commission rate (%)<input type="number" min="0" max="100" step="0.1" placeholder="Platform default" value={form.commissionPercent} onChange={(e)=>setForm({...form,commissionPercent:e.target.value})}/></label>
     <label>Owner full name<input required value={form.ownerName} onChange={(e)=>setForm({...form,ownerName:e.target.value})}/></label>
+    <label>Owner username (optional)<input value={form.ownerUsername} onChange={(e)=>setForm({...form,ownerUsername:e.target.value.toLowerCase()})}/></label>
     <label>Owner email<input required type="email" value={form.ownerEmail} onChange={(e)=>setForm({...form,ownerEmail:e.target.value})}/></label>
     <label>Owner phone<input value={form.ownerPhone} onChange={(e)=>setForm({...form,ownerPhone:e.target.value})}/></label>
-    <label>Initial password<input required type="password" minLength={8} value={form.initialPassword} onChange={(e)=>setForm({...form,initialPassword:e.target.value})}/></label>
+    <PasswordField label="Temporary password" value={form.initialPassword} onChange={(value)=>setForm({...form,initialPassword:value})}/>
     <label className="checkbox-label"><input type="checkbox" checked={form.manualOrderAcceptance} onChange={(e)=>setForm({...form,manualOrderAcceptance:e.target.checked})}/>Require vendor order acceptance</label>
+    <p className="muted-note">The vendor ID is generated automatically. A welcome email with the username, email and temporary password is sent to the owner on creation.</p>
     {error&&<p className="auth-error">{error}</p>}
     <button className="primary" disabled={busy}>{busy?"Creating…":"Create vendor"}</button>
+  </form>;
+}
+
+function EditVendorForm({restaurant,onSaved}:{restaurant:AdminRestaurant;onSaved:()=>void}){
+  const [form,setForm]=useState({name:restaurant.name,imageUrl:restaurant.imageUrl||"",area:restaurant.area,address:restaurant.address||"",latitude:String(restaurant.latitude),longitude:String(restaurant.longitude),commissionPercent:restaurant.commissionPercent===null?"":String(restaurant.commissionPercent)});
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const save=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
+    try{
+      await adminApi(`/restaurants/${restaurant.id}`,{method:"PATCH",body:JSON.stringify({name:form.name,imageUrl:form.imageUrl||null,area:form.area,address:form.address,latitude:Number(form.latitude),longitude:Number(form.longitude),commissionPercent:form.commissionPercent===""?null:Number(form.commissionPercent)})});
+      onSaved();
+    }catch(e){setError(e instanceof Error?e.message:"Could not save this vendor");}finally{setBusy(false);}
+  };
+  return <form className="auth-form inline-form" onSubmit={(e)=>void save(e)}>
+    <ImageUploadField label="Shop / restaurant photo" value={form.imageUrl} onChange={(imageUrl)=>setForm({...form,imageUrl})}/>
+    <label>Business name<input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></label>
+    <label>Address<input required value={form.address} onChange={(e)=>setForm({...form,address:e.target.value})}/></label>
+    <label>Area<input required value={form.area} onChange={(e)=>setForm({...form,area:e.target.value})}/></label>
+    <label>Latitude<input required type="number" step="any" value={form.latitude} onChange={(e)=>setForm({...form,latitude:e.target.value})}/></label>
+    <label>Longitude<input required type="number" step="any" value={form.longitude} onChange={(e)=>setForm({...form,longitude:e.target.value})}/></label>
+    <label>Commission rate (%)<input type="number" min="0" max="100" step="0.1" placeholder="Platform default" value={form.commissionPercent} onChange={(e)=>setForm({...form,commissionPercent:e.target.value})}/></label>
+    {error&&<p className="auth-error">{error}</p>}
+    <button className="primary" disabled={busy}>{busy?"Saving…":"Save vendor"}</button>
   </form>;
 }
 
@@ -358,7 +463,7 @@ function AddVendorUserForm({restaurantId,onCreated}:{restaurantId:string;onCreat
     <label>Email<input required type="email" value={form.email} onChange={(e)=>setForm({...form,email:e.target.value})}/></label>
     <label>Phone (optional)<input value={form.phone} onChange={(e)=>setForm({...form,phone:e.target.value})}/></label>
     <label>Title (e.g. Kitchen Staff)<input value={form.staffTitle} onChange={(e)=>setForm({...form,staffTitle:e.target.value})}/></label>
-    <label>Initial password<input required type="password" minLength={8} value={form.initialPassword} onChange={(e)=>setForm({...form,initialPassword:e.target.value})}/></label>
+    <PasswordField label="Initial password" value={form.initialPassword} onChange={(value)=>setForm({...form,initialPassword:value})}/>
     <label>Role
       <select value={form.role} onChange={(e)=>setForm({...form,role:e.target.value})}>
         <option value="VENDOR_OWNER">Owner</option>
@@ -373,89 +478,113 @@ function AddVendorUserForm({restaurantId,onCreated}:{restaurantId:string;onCreat
   </form>;
 }
 
-function VendorOffersPanel({restaurantId,offers,onChange}:{restaurantId:string;offers:{id:string;title:string;description:string|null}[];onChange:()=>Promise<void>}){
+function VendorPercentOffersPanel({restaurantId}:{restaurantId:string}){
+  const [coupons,setCoupons]=useState<AdminCoupon[]|null>(null);
   const [showAdd,setShowAdd]=useState(false);
-  const [form,setForm]=useState({title:"",description:""});
+  const [form,setForm]=useState({title:"",percent:"",minOrder:"0"});
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
+  const load=useCallback(async()=>{try{const r=await adminApi<{coupons:AdminCoupon[]}>("/coupons");setCoupons(r.coupons.filter((c)=>c.targetRestaurantIds.includes(restaurantId)));setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load offers");}},[restaurantId]);
+  useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
 
   const add=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
     try{
-      await adminApi(`/restaurants/${restaurantId}/offers`,{method:"POST",body:JSON.stringify({title:form.title,description:form.description||null})});
-      setForm({title:"",description:""});setShowAdd(false);await onChange();
+      const code=`${(form.title.toLowerCase().replace(/[^a-z0-9]+/g,"").slice(0,10)||"offer")}${Date.now().toString(36)}`.toUpperCase();
+      await adminApi("/coupons",{method:"POST",body:JSON.stringify({code,title:form.title,type:"PERCENT",value:Number(form.percent),minOrder:Number(form.minOrder)||0,targetRestaurantIds:[restaurantId]})});
+      setForm({title:"",percent:"",minOrder:"0"});setShowAdd(false);await load();
     }catch(e){setError(e instanceof Error?e.message:"Could not add this offer");}finally{setBusy(false);}
   };
-  const remove=async(offerId:string)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/offers/${offerId}`,{method:"DELETE"});await onChange();}catch(e){setError(e instanceof Error?e.message:"Could not remove this offer");}finally{setBusy(false);}};
+  const toggle=async(c:AdminCoupon)=>{setBusy(true);try{await adminApi(`/coupons/${c.id}`,{method:"PATCH",body:JSON.stringify({active:!c.active})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update this offer");}finally{setBusy(false);}};
+  const remove=async(c:AdminCoupon)=>{setBusy(true);try{await adminApi(`/coupons/${c.id}`,{method:"DELETE"});await load();}catch(e){setError(e instanceof Error?e.message:"Could not remove this offer");}finally{setBusy(false);}};
 
   return <div className="team-panel">
     {error&&<p className="auth-error">{error}</p>}
-    {!offers.length?<p className="muted-note">No offers on this restaurant yet.</p>:
-      <div className="team-list">{offers.map((o)=><div key={o.id} className="team-member">
+    <p className="muted-note">These are real, functioning percentage discounts customers can apply at checkout for this vendor (not just a display banner).</p>
+    {coupons===null?<p className="muted-note">Loading offers…</p>:!coupons.length?<p className="muted-note">No percentage offers for this vendor yet.</p>:
+      <div className="team-list">{coupons.map((c)=><div key={c.id} className="team-member">
         <div className="team-member-head">
-          <b>{o.title}</b>{o.description?<small>{o.description}</small>:null}
+          <b>{c.title||c.code}</b><small>{c.value}% off{c.minOrder?` • Min order ₹${c.minOrder}`:""} • Code {c.code}</small>
+          <span className={`status status-${c.active?"active":"suspended"}`}>● {c.active?"Active":"Paused"}</span>
         </div>
         <div className="team-member-actions">
-          <button className="secondary danger-text" disabled={busy} onClick={()=>void remove(o.id)}>Remove</button>
+          <button className="secondary" disabled={busy} onClick={()=>void toggle(c)}>{c.active?"Pause":"Activate"}</button>
+          <button className="secondary danger-text" disabled={busy} onClick={()=>void remove(c)}>Remove</button>
         </div>
       </div>)}</div>}
-    <PrimaryActionButton label={showAdd?"Cancel":"+ Add Offer"} onClick={()=>setShowAdd(!showAdd)}/>
+    <PrimaryActionButton label={showAdd?"Cancel":"+ Add % Offer"} onClick={()=>setShowAdd(!showAdd)}/>
     {showAdd&&<form className="auth-form inline-form" onSubmit={(e)=>void add(e)}>
-      <label>{'Offer title (e.g. "50% OFF")'}<input required value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></label>
-      <label>Description (optional)<input value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label>
+      <label>{'Offer title (e.g. "Weekend 20% off")'}<input required value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})}/></label>
+      <label>Discount (%)<input required type="number" min="1" max="100" value={form.percent} onChange={(e)=>setForm({...form,percent:e.target.value})}/></label>
+      <label>Minimum order (₹, optional)<input type="number" min="0" value={form.minOrder} onChange={(e)=>setForm({...form,minOrder:e.target.value})}/></label>
+      {error&&<p className="auth-error">{error}</p>}
       <button className="primary" disabled={busy}>{busy?"Adding…":"Add offer"}</button>
     </form>}
   </div>;
 }
 
-type AdminMenuItem = { id:string; name:string; description:string; price:number; veg:boolean; available:boolean; categoryId:string };
+type AdminMenuItem = { id:string; name:string; description:string; imageUrl:string|null; price:number; discountPercent:number; veg:boolean; available:boolean; categoryId:string };
 
-function VendorMenuPanel({restaurantId}:{restaurantId:string}){
+function VendorMenuGrid({restaurant,onBack}:{restaurant:AdminRestaurant;onBack:()=>void}){
   const [items,setItems]=useState<AdminMenuItem[]|null>(null);
   const [showAdd,setShowAdd]=useState(false);
+  const [editingItem,setEditingItem]=useState<AdminMenuItem|null>(null);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
-  const load=useCallback(async()=>{try{const r=await adminApi<{items:AdminMenuItem[]}>(`/restaurants/${restaurantId}/menu`);setItems(r.items);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load this restaurant's menu");}},[restaurantId]);
+  const load=useCallback(async()=>{try{const r=await adminApi<{items:AdminMenuItem[]}>(`/restaurants/${restaurant.id}/menu`);setItems(r.items);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load this restaurant's menu");}},[restaurant.id]);
   useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
 
-  const toggleAvailable=async(item:AdminMenuItem)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/menu/${item.id}`,{method:"PATCH",body:JSON.stringify({available:!item.available})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update this item");}finally{setBusy(false);}};
-  const remove=async(item:AdminMenuItem)=>{if(!confirm(`Delete "${item.name}"?`))return;setBusy(true);try{await adminApi(`/restaurants/${restaurantId}/menu/${item.id}`,{method:"DELETE"});await load();}catch(e){setError(e instanceof Error?e.message:"Could not delete this item");}finally{setBusy(false);}};
+  const toggleAvailable=async(item:AdminMenuItem)=>{setBusy(true);try{await adminApi(`/restaurants/${restaurant.id}/menu/${item.id}`,{method:"PATCH",body:JSON.stringify({available:!item.available})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update this item");}finally{setBusy(false);}};
+  const remove=async(item:AdminMenuItem)=>{if(!confirm(`Delete "${item.name}"?`))return;setBusy(true);try{await adminApi(`/restaurants/${restaurant.id}/menu/${item.id}`,{method:"DELETE"});await load();}catch(e){setError(e instanceof Error?e.message:"Could not delete this item");}finally{setBusy(false);}};
 
-  return <div className="team-panel">
+  return <WorkspacePage eyebrow={`MENU — ${restaurant.name.toUpperCase()}`} title="Menu items" copy="Every dish on this vendor's menu, with photos, pricing and per-item discounts.">
+    <button className="secondary" style={{marginBottom:14}} onClick={onBack}>← Back to vendors</button>
     {error&&<p className="auth-error">{error}</p>}
-    {items===null?<p className="muted-note">Loading menu…</p>:!items.length?<p className="muted-note">No menu items yet.</p>:
-      <div className="team-list">{items.map((item)=><div key={item.id} className="team-member">
-        <div className="team-member-head">
-          <b>{item.name}</b><small>{item.veg?"Veg":"Non-veg"} • ₹{item.price}{item.description?` • ${item.description}`:""}</small>
-          <span className={`status status-${item.available?"active":"suspended"}`}>● {item.available?"Available":"Unavailable"}</span>
-        </div>
-        <div className="team-member-actions">
-          <button className="secondary" disabled={busy} onClick={()=>void toggleAvailable(item)}>{item.available?"Mark unavailable":"Mark available"}</button>
-          <button className="secondary danger-text" disabled={busy} onClick={()=>void remove(item)}>Delete</button>
-        </div>
-      </div>)}</div>}
-    <PrimaryActionButton label={showAdd?"Cancel":"+ Add Menu Item"} onClick={()=>setShowAdd(!showAdd)}/>
-    {showAdd&&<AddMenuItemForm restaurantId={restaurantId} onCreated={()=>{setShowAdd(false);void load();}}/>}
-  </div>;
+    <div className="menu-grid-toolbar">
+      <PrimaryActionButton label={showAdd?"Cancel":"+ Add Menu Item"} onClick={()=>{setEditingItem(null);setShowAdd(!showAdd);}}/>
+    </div>
+    {showAdd&&<MenuItemForm restaurantId={restaurant.id} onDone={()=>{setShowAdd(false);void load();}}/>}
+    {items===null?<Empty title="Loading…" copy="Fetching this vendor's menu."/>:!items.length?<Empty title="No menu items yet" copy="Add the first dish above."/>:
+    <div className="menu-grid">{items.map((item)=><article key={item.id} className="menu-card">
+      {item.imageUrl?<img src={item.imageUrl} alt="" className="menu-card-image"/>:<div className="menu-card-image menu-card-image-empty">No photo</div>}
+      {item.discountPercent>0&&<span className="menu-card-discount">{item.discountPercent}% OFF</span>}
+      <div className="menu-card-body">
+        <b>{item.name}</b>
+        <small>{item.veg?"Veg":"Non-veg"} • ₹{item.price}</small>
+        {item.description&&<p className="muted-note">{item.description}</p>}
+        <span className={`status status-${item.available?"active":"suspended"}`}>● {item.available?"Available":"Unavailable"}</span>
+      </div>
+      {editingItem?.id===item.id?<MenuItemForm restaurantId={restaurant.id} item={item} onDone={()=>{setEditingItem(null);void load();}}/>:
+      <div className="menu-card-actions">
+        <button className="secondary" disabled={busy} onClick={()=>{setShowAdd(false);setEditingItem(item);}}>Edit</button>
+        <button className="secondary" disabled={busy} onClick={()=>void toggleAvailable(item)}>{item.available?"Mark unavailable":"Mark available"}</button>
+        <button className="secondary danger-text" disabled={busy} onClick={()=>void remove(item)}>Delete</button>
+      </div>}
+    </article>)}</div>}
+  </WorkspacePage>;
 }
 
-function AddMenuItemForm({restaurantId,onCreated}:{restaurantId:string;onCreated:()=>void}){
-  const [form,setForm]=useState({name:"",description:"",price:"",categoryKey:"mains",veg:true});
+function MenuItemForm({restaurantId,item,onDone}:{restaurantId:string;item?:AdminMenuItem;onDone:()=>void}){
+  const [form,setForm]=useState({name:item?.name||"",description:item?.description||"",imageUrl:item?.imageUrl||"",price:item?item.price!==undefined?String(item.price):"":"",discountPercent:item?String(item.discountPercent||0):"0",categoryKey:item?.categoryId||"mains",veg:item?item.veg:true});
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
     try{
-      await adminApi(`/restaurants/${restaurantId}/menu`,{method:"POST",body:JSON.stringify({name:form.name,description:form.description,price:Number(form.price),categoryKey:form.categoryKey,veg:form.veg})});
-      onCreated();
-    }catch(e){setError(e instanceof Error?e.message:"Could not add this menu item");}finally{setBusy(false);}
+      const body=JSON.stringify({name:form.name,description:form.description,imageUrl:form.imageUrl||null,price:Number(form.price),discountPercent:Number(form.discountPercent)||0,categoryKey:form.categoryKey,veg:form.veg});
+      if(item)await adminApi(`/restaurants/${restaurantId}/menu/${item.id}`,{method:"PATCH",body});
+      else await adminApi(`/restaurants/${restaurantId}/menu`,{method:"POST",body});
+      onDone();
+    }catch(e){setError(e instanceof Error?e.message:"Could not save this menu item");}finally{setBusy(false);}
   };
   return <form className="auth-form inline-form" onSubmit={(e)=>void submit(e)}>
+    <ImageUploadField label="Dish photo" value={form.imageUrl} onChange={(imageUrl)=>setForm({...form,imageUrl})}/>
     <label>Dish name<input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></label>
     <label>Description (optional)<input value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label>
     <label>Price (₹)<input required type="number" min="1" value={form.price} onChange={(e)=>setForm({...form,price:e.target.value})}/></label>
+    <label>Discount (%, optional)<input type="number" min="0" max="100" value={form.discountPercent} onChange={(e)=>setForm({...form,discountPercent:e.target.value})}/></label>
     <label>Category key (e.g. mains, starters)<input required value={form.categoryKey} onChange={(e)=>setForm({...form,categoryKey:e.target.value})}/></label>
     <label className="checkbox-label"><input type="checkbox" checked={form.veg} onChange={(e)=>setForm({...form,veg:e.target.checked})}/>Vegetarian</label>
     {error&&<p className="auth-error">{error}</p>}
-    <button className="primary" disabled={busy}>{busy?"Adding…":"Add menu item"}</button>
+    <button className="primary" disabled={busy}>{busy?"Saving…":item?"Save changes":"Add menu item"}</button>
   </form>;
 }
 
@@ -481,7 +610,7 @@ function AdminCustomers(){
   </WorkspacePage>;
 }
 
-type AdminPartnerRow = { id:string; name:string; email:string; phone:string|null; vehicleType:string|null; vehicleNumber:string|null; status:string; partnerApprovalStatus:string; partnerOnline:boolean; partnerBusy:boolean };
+type AdminPartnerRow = { id:string; name:string; email:string; phone:string|null; photoUrl:string|null; vehicleType:string|null; vehicleNumber:string|null; aadhaarNumber:string|null; panNumber:string|null; bankDetails:{accountNumber?:string;ifsc?:string;accountHolderName?:string}|null; status:string; partnerApprovalStatus:string; partnerOnline:boolean; partnerBusy:boolean; partnerRating:number; partnerCompletedDeliveries:number };
 
 function AdminPartners(){
   const [partners,setPartners]=useState<AdminPartnerRow[]|null>(null);
@@ -492,11 +621,12 @@ function AdminPartners(){
   useEffect(()=>{const initial=setTimeout(()=>void load(),0);const t=setInterval(()=>void load(),8000);return()=>{clearTimeout(initial);clearInterval(t);};},[load]);
   const setApproval=async(id:string,approvalStatus:string)=>{setBusy(true);try{await adminApi(`/partners/${id}/approval`,{method:"PATCH",body:JSON.stringify({approvalStatus})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update approval");}finally{setBusy(false);}};
   const setStatus=async(id:string,status:string)=>{setBusy(true);try{await adminApi(`/partners/${id}/status`,{method:"PATCH",body:JSON.stringify({status})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update status");}finally{setBusy(false);}};
+  const remove=async(p:AdminPartnerRow)=>{if(!confirm(`Delete "${p.name}"? Partners with delivery history are disabled instead of permanently deleted.`))return;setBusy(true);try{const res=await adminApi<{deleted:boolean;disabled?:boolean}>(`/partners/${p.id}`,{method:"DELETE"});await load();if(res.disabled)alert(`"${p.name}" has delivery history, so the account was disabled instead of deleted.`);}catch(e){setError(e instanceof Error?e.message:"Could not delete this partner");}finally{setBusy(false);}};
 
   return <WorkspacePage eyebrow="DELIVERY FLEET" title="Delivery partners" copy="Approve new partners, and control who can go online and receive deliveries.">
     {error&&<p className="auth-error">{error}</p>}
     <FlowSteps steps={[
-      ["1","Create partner login","Enter identity, phone, vehicle and initial password."],
+      ["1","Create partner login","Enter identity, KYC documents, bank details and a temporary password."],
       ["2","Verify & approve","Keep pending until documents are checked, or approve immediately."],
       ["3","Keep active","Only active and approved partners can go online."],
       ["4","Partner goes online","The Partner app receives offers only after online + location update."],
@@ -505,33 +635,56 @@ function AdminPartners(){
     {showCreate&&<CreatePartnerForm onCreated={()=>{setShowCreate(false);void load();}}/>}
     {partners===null?<Empty title="Loading…" copy="Fetching delivery partners."/>:!partners.length?<Empty title="No delivery partners yet" copy="Create one above to get started."/>:
     <div className="directory">{partners.map((p)=><article key={p.id}>
-      <i>{p.name[0]||"?"}</i>
-      <span><b>{p.name}</b><small>{p.email}{p.phone?` • ${p.phone}`:""}{p.vehicleType?` • ${p.vehicleType} ${p.vehicleNumber||""}`:""}</small></span>
+      {p.photoUrl?<img src={p.photoUrl} alt="" className="vendor-thumb"/>:<i>{p.name[0]||"?"}</i>}
+      <span><b>{p.name}</b><small>{p.email}{p.phone?` • ${p.phone}`:""}{p.vehicleType?` • ${p.vehicleType} ${p.vehicleNumber||""}`:""} • ★ {(p.partnerRating||0).toFixed(1)} • {p.partnerCompletedDeliveries} deliveries</small></span>
       <span className={`status status-${p.partnerOnline?"online":"suspended"}`}>● {p.partnerBusy?"On a delivery":p.partnerOnline?"Online":"Offline"}</span>
       {p.partnerApprovalStatus==="PENDING"?<><button className="secondary" disabled={busy} onClick={()=>void setApproval(p.id,"APPROVED")}>Approve</button><button className="secondary danger-text" disabled={busy} onClick={()=>void setApproval(p.id,"REJECTED")}>Reject</button></>
         :p.status==="ACTIVE"?<button className="secondary" disabled={busy} onClick={()=>void setStatus(p.id,"SUSPENDED")}>Suspend</button>:<button className="secondary" disabled={busy} onClick={()=>void setStatus(p.id,"ACTIVE")}>Activate</button>}
+      <button className="secondary danger-text" disabled={busy} onClick={()=>void remove(p)}>Delete</button>
     </article>)}</div>}
   </WorkspacePage>;
 }
 
 function CreatePartnerForm({onCreated}:{onCreated:()=>void}){
-  const [form,setForm]=useState({name:"",email:"",phone:"",vehicleType:"Bike",vehicleNumber:"",licenceNumber:"",initialPassword:"",approveNow:true});
+  const [form,setForm]=useState({name:"",email:"",phone:"",photoUrl:"",vehicleType:"Bike",vehicleNumber:"",licenceNumber:"",aadhaarNumber:"",panNumber:"",bankAccountNumber:"",bankIfsc:"",bankAccountHolderName:"",initialPassword:"",approveNow:true});
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
+  const [created,setCreated]=useState<{name:string;partnerId:string;email:string;password:string}|null>(null);
   const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
-    try{await adminApi("/partners",{method:"POST",body:JSON.stringify(form)});onCreated();}
+    try{
+      const res=await adminApi<{partner:{id:string}}>("/partners",{method:"POST",body:JSON.stringify({
+        name:form.name,email:form.email,phone:form.phone||undefined,photoUrl:form.photoUrl||null,
+        vehicleType:form.vehicleType||null,vehicleNumber:form.vehicleNumber||null,licenceNumber:form.licenceNumber||null,
+        aadhaarNumber:form.aadhaarNumber,panNumber:form.panNumber||undefined,
+        bankDetails:(form.bankAccountNumber||form.bankIfsc||form.bankAccountHolderName)?{accountNumber:form.bankAccountNumber,ifsc:form.bankIfsc,accountHolderName:form.bankAccountHolderName}:null,
+        initialPassword:form.initialPassword,approveNow:form.approveNow,
+      })});
+      setCreated({name:form.name,partnerId:res.partner.id,email:form.email,password:form.initialPassword});
+      onCreated();
+    }
     catch(e){setError(e instanceof Error?e.message:"Could not create this delivery partner");}finally{setBusy(false);}
   };
+  if(created)return <div className="auth-form inline-form">
+    <p><b>{created.name}</b> was created.</p>
+    <p className="muted-note">Partner ID: <b>{created.partnerId}</b><br/>Login email: <b>{created.email}</b> • Temporary password: <b>{created.password}</b><br/>A welcome email with these credentials was sent to the partner (delivery depends on email being configured on this server).</p>
+  </div>;
   return <form className="auth-form inline-form" onSubmit={(e)=>void submit(e)}>
+    <ImageUploadField label="Partner photo" value={form.photoUrl} onChange={(photoUrl)=>setForm({...form,photoUrl})}/>
     <label>Full name<input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></label>
     <label>Email<input required type="email" value={form.email} onChange={(e)=>setForm({...form,email:e.target.value})}/></label>
-    <label>Phone<input value={form.phone} onChange={(e)=>setForm({...form,phone:e.target.value})}/></label>
+    <label>Mobile number<input required value={form.phone} onChange={(e)=>setForm({...form,phone:e.target.value})}/></label>
+    <label>Aadhaar number<input required inputMode="numeric" maxLength={12} value={form.aadhaarNumber} onChange={(e)=>setForm({...form,aadhaarNumber:e.target.value.replace(/\D/g,"")})}/></label>
+    <label>PAN (optional)<input value={form.panNumber} onChange={(e)=>setForm({...form,panNumber:e.target.value.toUpperCase()})}/></label>
+    <label>Driving licence number (optional)<input value={form.licenceNumber} onChange={(e)=>setForm({...form,licenceNumber:e.target.value})}/></label>
     <label>Vehicle type<input value={form.vehicleType} onChange={(e)=>setForm({...form,vehicleType:e.target.value})}/></label>
     <label>Vehicle number<input value={form.vehicleNumber} onChange={(e)=>setForm({...form,vehicleNumber:e.target.value})}/></label>
-    <label>Licence number<input value={form.licenceNumber} onChange={(e)=>setForm({...form,licenceNumber:e.target.value})}/></label>
-    <label>Initial password<input required type="password" minLength={8} value={form.initialPassword} onChange={(e)=>setForm({...form,initialPassword:e.target.value})}/></label>
+    <p className="muted-note" style={{margin:"4px 0 -6px"}}>Bank account for delivery payouts</p>
+    <label>Account number<input value={form.bankAccountNumber} onChange={(e)=>setForm({...form,bankAccountNumber:e.target.value})}/></label>
+    <label>IFSC<input value={form.bankIfsc} onChange={(e)=>setForm({...form,bankIfsc:e.target.value.toUpperCase()})}/></label>
+    <label>Account holder name<input value={form.bankAccountHolderName} onChange={(e)=>setForm({...form,bankAccountHolderName:e.target.value})}/></label>
+    <PasswordField label="Temporary password" value={form.initialPassword} onChange={(value)=>setForm({...form,initialPassword:value})}/>
     <label className="checkbox-label"><input type="checkbox" checked={form.approveNow} onChange={(e)=>setForm({...form,approveNow:e.target.checked})}/>Approve this partner immediately</label>
-    <p className="muted-note">They can sign in with this password or request an email OTP.</p>
+    <p className="muted-note">The partner ID is generated automatically. A welcome email with the login email and temporary password is sent on creation.</p>
     {error&&<p className="auth-error">{error}</p>}
     <button className="primary" disabled={busy}>{busy?"Creating…":"Create delivery partner"}</button>
   </form>;
