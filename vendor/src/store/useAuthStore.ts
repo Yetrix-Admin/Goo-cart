@@ -1,16 +1,13 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { apiPost, markAuthReady, setAuthToken } from "@/services/apiClient";
-import { registerForPushNotifications } from "@/services/PushService";
+import { registerForPushNotifications, unregisterPushToken } from "@/services/PushService";
 import { disconnectSocket } from "@/services/socket";
+import { clearLegacyUser, clearToken, migrateLegacyToken, readLegacyUser, readToken, writeLegacyUser, writeToken } from "@/services/SessionStorage";
 import { useOrdersStore } from "@/store/useOrdersStore";
 import { useVendorStore } from "@/store/useVendorStore";
 import { VendorUser } from "@/types";
 
-const STORAGE_KEY = "goocart.vendor.auth.v1";
 const VENDOR_ROLES = ["VENDOR_OWNER", "VENDOR_MANAGER", "VENDOR_STAFF"];
-
-type StoredAuth = { token: string; user: VendorUser };
 
 type AuthState = {
   user: VendorUser | null;
@@ -40,14 +37,14 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   hydrate: async () => {
     try {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!raw) {
+      await migrateLegacyToken();
+      const [token, user] = await Promise.all([readToken(), readLegacyUser<VendorUser>()]);
+      if (!token || !user) {
         set({ user: null, token: null, hasHydrated: true });
         return;
       }
-      const stored = JSON.parse(raw) as StoredAuth;
-      setAuthToken(stored.token);
-      set({ user: stored.user, token: stored.token, hasHydrated: true });
+      setAuthToken(token);
+      set({ user, token, hasHydrated: true });
       void registerForPushNotifications();
     } catch {
       set({ user: null, token: null, hasHydrated: true });
@@ -63,9 +60,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
+    await unregisterPushToken();
     disconnectSocket();
     setAuthToken(null);
-    await AsyncStorage.removeItem(STORAGE_KEY);
+    await Promise.all([clearToken(), clearLegacyUser()]);
     useOrdersStore.getState().clear();
     useVendorStore.getState().clear();
     set({ user: null, token: null });
@@ -87,7 +85,8 @@ async function persist(data: TokenResponse, set: (partial: Partial<AuthState>) =
     staffTitle: data.user.staffTitle,
   };
   setAuthToken(data.token);
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ token: data.token, user } satisfies StoredAuth));
+  await writeToken(data.token);
+  await writeLegacyUser(user);
   set({ user, token: data.token });
   void registerForPushNotifications();
 }

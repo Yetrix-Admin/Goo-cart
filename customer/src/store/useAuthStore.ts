@@ -1,16 +1,12 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { apiPost, markAuthReady, setAuthToken } from "@/services/apiClient";
 import { useAddressStore } from "@/store/useAddressStore";
 import { useCartStore } from "@/store/useCartStore";
 import { useOrderStore } from "@/store/useOrderStore";
-import { registerForPushNotifications } from "@/services/PushService";
+import { registerForPushNotifications, unregisterPushToken } from "@/services/PushService";
 import { disconnectSocket } from "@/services/socket";
+import { clearLegacyUser, clearToken, migrateLegacyToken, readLegacyUser, readToken, writeLegacyUser, writeToken } from "@/services/SessionStorage";
 import { CustomerUser } from "@/types";
-
-const STORAGE_KEY = "goocart.auth.v2";
-
-type StoredAuth = { token: string; user: CustomerUser };
 
 type AuthState = {
   user: CustomerUser | null;
@@ -31,14 +27,14 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   hydrate: async () => {
     try {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!raw) {
+      await migrateLegacyToken();
+      const [token, user] = await Promise.all([readToken(), readLegacyUser<CustomerUser>()]);
+      if (!token || !user) {
         set({ user: null, token: null, hasHydrated: true });
         return;
       }
-      const stored = JSON.parse(raw) as StoredAuth;
-      setAuthToken(stored.token);
-      set({ user: stored.user, token: stored.token, hasHydrated: true });
+      setAuthToken(token);
+      set({ user, token, hasHydrated: true });
       void useAddressStore.getState().refresh();
       void registerForPushNotifications();
     } catch {
@@ -60,9 +56,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
+    await unregisterPushToken();
     disconnectSocket();
     setAuthToken(null);
-    await AsyncStorage.removeItem(STORAGE_KEY);
+    await Promise.all([clearToken(), clearLegacyUser()]);
     useCartStore.getState().clear();
     useOrderStore.getState().clear();
     set({ user: null, token: null });
@@ -81,7 +78,8 @@ async function persist(data: TokenResponse, set: (partial: Partial<AuthState>) =
     isDemo: false,
   };
   setAuthToken(data.token);
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ token: data.token, user } satisfies StoredAuth));
+  await writeToken(data.token);
+  await writeLegacyUser(user);
   set({ user, token: data.token });
   // A brand-new signup has no addresses yet, but re-fetching is still
   // correct (and cheap) — it clears any stale guest-session cache.

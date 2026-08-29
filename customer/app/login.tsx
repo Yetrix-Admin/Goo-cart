@@ -2,6 +2,7 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { Brand } from "@/components/Brand";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { colors, radius, spacing, typography } from "@/theme";
@@ -106,12 +107,33 @@ export default function LoginScreen() {
 
 function Field({
   label,
+  secureTextEntry,
   ...props
 }: { label: string } & React.ComponentProps<typeof TextInput>) {
+  const [visible, setVisible] = useState(false);
   return (
     <View style={styles.field}>
       <Text style={typography.captionStrong}>{label}</Text>
-      <TextInput style={styles.input} placeholderTextColor={colors.muted} autoCorrect={false} {...props} />
+      <View style={styles.inputWrap}>
+        <TextInput
+          style={[styles.input, secureTextEntry ? styles.inputWithIcon : null]}
+          placeholderTextColor={colors.muted}
+          autoCorrect={false}
+          secureTextEntry={secureTextEntry && !visible}
+          {...props}
+        />
+        {secureTextEntry ? (
+          <Pressable
+            style={styles.visibilityToggle}
+            hitSlop={8}
+            onPress={() => setVisible((v) => !v)}
+            accessibilityRole="button"
+            accessibilityLabel={visible ? "Hide password" : "Show password"}
+          >
+            <Ionicons name={visible ? "eye-off-outline" : "eye-outline"} size={20} color={colors.muted} />
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -123,6 +145,7 @@ const styles = StyleSheet.create({
   hero: { gap: spacing.xs },
   copy: { ...typography.body, color: colors.muted },
   field: { gap: 6 },
+  inputWrap: { justifyContent: "center" },
   input: {
     height: 50,
     borderWidth: 1,
@@ -132,6 +155,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     ...typography.body,
   },
+  inputWithIcon: { paddingRight: 44 },
+  visibilityToggle: { position: "absolute", right: 0, height: 50, width: 44, alignItems: "center", justifyContent: "center" },
   error: { ...typography.caption, color: colors.error },
   switch: { alignItems: "center", paddingVertical: spacing.sm },
   switchText: { ...typography.captionStrong, color: colors.primary },

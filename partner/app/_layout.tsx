@@ -5,12 +5,14 @@ import { StatusBar } from "expo-status-bar";
 import { Stack } from "expo-router";
 import { colors } from "@/theme";
 import { useAuthStore } from "@/store/useAuthStore";
+import { initNotificationDeepLinking } from "@/services/PushService";
 
 export default function RootLayout() {
   // Hydrated once at the root so a persisted session survives a cold start on
   // any route, not just the splash screen.
   useEffect(() => {
     void useAuthStore.getState().hydrate();
+    return initNotificationDeepLinking();
   }, []);
 
   return (

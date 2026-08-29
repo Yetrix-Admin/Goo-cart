@@ -1,15 +1,11 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { apiPost, markAuthReady, setAuthToken } from "@/services/apiClient";
 import { stopLocationTracking } from "@/services/LocationTracker";
 import { disconnectSocket } from "@/services/socket";
-import { registerForPushNotifications } from "@/services/PushService";
+import { registerForPushNotifications, unregisterPushToken } from "@/services/PushService";
+import { clearLegacyUser, clearToken, migrateLegacyToken, readLegacyUser, readToken, writeLegacyUser, writeToken } from "@/services/SessionStorage";
 import { useOrdersStore } from "@/store/useOrdersStore";
 import { PartnerUser } from "@/types";
-
-const STORAGE_KEY = "goocart.partner.auth.v1";
-
-type StoredAuth = { token: string; user: PartnerUser };
 
 type AuthState = {
   user: PartnerUser | null;
@@ -35,14 +31,14 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   hydrate: async () => {
     try {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!raw) {
+      await migrateLegacyToken();
+      const [token, user] = await Promise.all([readToken(), readLegacyUser<PartnerUser>()]);
+      if (!token || !user) {
         set({ user: null, token: null, hasHydrated: true });
         return;
       }
-      const stored = JSON.parse(raw) as StoredAuth;
-      setAuthToken(stored.token);
-      set({ user: stored.user, token: stored.token, hasHydrated: true });
+      setAuthToken(token);
+      set({ user, token, hasHydrated: true });
       void registerForPushNotifications();
     } catch {
       set({ user: null, token: null, hasHydrated: true });
@@ -58,10 +54,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
+    await unregisterPushToken();
     stopLocationTracking();
     disconnectSocket();
     setAuthToken(null);
-    await AsyncStorage.removeItem(STORAGE_KEY);
+    await Promise.all([clearToken(), clearLegacyUser()]);
     useOrdersStore.getState().clear();
     set({ user: null, token: null });
   },
@@ -80,7 +77,8 @@ async function persist(data: TokenResponse, set: (partial: Partial<AuthState>) =
     partnerApprovalStatus: (data.user.partnerApprovalStatus as PartnerUser["partnerApprovalStatus"]) ?? "APPROVED",
   };
   setAuthToken(data.token);
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ token: data.token, user } satisfies StoredAuth));
+  await writeToken(data.token);
+  await writeLegacyUser(user);
   set({ user, token: data.token });
   void registerForPushNotifications();
 }
