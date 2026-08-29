@@ -26,7 +26,8 @@ class OrderError extends Error {
 
 async function resolveVendorAutomation(restaurant: any): Promise<{ mode: "MANUAL" | "AUTOMATIC" | "SMART_AUTOMATIC"; preparationMinutes: number; reason: string }> {
   const settings = await getAutomationSettings();
-  const mode = (restaurant.autoAcceptanceMode ?? (restaurant.manualOrderAcceptance === false ? "AUTOMATIC" : "MANUAL")) as "MANUAL" | "AUTOMATIC" | "SMART_AUTOMATIC";
+  const rawMode = restaurant.autoAcceptanceMode as "MANUAL" | "AUTOMATIC" | "SMART_AUTOMATIC" | undefined;
+  const mode = (restaurant.manualOrderAcceptance === false && (!rawMode || rawMode === "MANUAL") ? "AUTOMATIC" : rawMode ?? "MANUAL") as "MANUAL" | "AUTOMATIC" | "SMART_AUTOMATIC";
   const preparationMinutes = Number(restaurant.averagePreparationMinutes ?? settings.vendor.defaultAveragePreparationMinutes) || settings.vendor.defaultAveragePreparationMinutes;
 
   if (mode === "AUTOMATIC") return { mode, preparationMinutes, reason: "Restaurant configured for automatic acceptance." };
