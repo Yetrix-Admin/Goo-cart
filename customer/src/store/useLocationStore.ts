@@ -6,6 +6,10 @@ const STORAGE_KEY = "goocart.location.v1";
 
 export type SelectedLocation = {
   label: string;
+  // Exact, human-readable location (street/place + city) shown on the home
+  // screen. Falls back to city for the preset Home/Work entries, which have
+  // no street-level detail of their own.
+  address: string;
   city: string;
   region: string;
   latitude: number | null;
@@ -13,8 +17,8 @@ export type SelectedLocation = {
 };
 
 export const DEMO_LOCATIONS: SelectedLocation[] = [
-  { label: "Home", city: "Jangareddigudem", region: "Andhra Pradesh", latitude: 17.4362, longitude: 81.2661 },
-  { label: "Work", city: "Vijayawada", region: "Andhra Pradesh", latitude: 16.5062, longitude: 80.648 },
+  { label: "Home", address: "Jangareddigudem", city: "Jangareddigudem", region: "Andhra Pradesh", latitude: 17.4362, longitude: 81.2661 },
+  { label: "Work", address: "Vijayawada", city: "Vijayawada", region: "Andhra Pradesh", latitude: 16.5062, longitude: 80.648 },
 ];
 
 type LocationState = {
@@ -45,6 +49,7 @@ export const useLocationStore = create<LocationState>((set) => ({
     if (!resolved) return false;
     const location: SelectedLocation = {
       label: "Current location",
+      address: resolved.address,
       city: resolved.city,
       region: resolved.region,
       latitude: resolved.latitude,

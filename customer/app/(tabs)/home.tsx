@@ -75,18 +75,19 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
+        <View style={styles.headerSide} />
         <Pressable style={styles.location} onPress={() => router.push("/location")} accessibilityRole="button">
           <View style={styles.pin}>
             <Icon name="location" size={17} color={colors.primary} />
           </View>
-          <View style={{ flex: 1 }}>
+          <View style={styles.locationText}>
             <Text style={styles.locationLabel}>DELIVERING TO</Text>
             <Text style={styles.locationName} numberOfLines={1}>
-              {location?.label ?? "Home"} · {location?.city ?? "Set location"}
+              {location?.address ?? location?.city ?? "Set your location"}
             </Text>
           </View>
         </Pressable>
-        <Pressable style={styles.profileButton} onPress={() => router.push("/(tabs)/account")} accessibilityLabel="Account">
+        <Pressable style={[styles.profileButton, styles.headerSide]} onPress={() => router.push("/(tabs)/account")} accessibilityLabel="Account">
           <Text style={styles.profileText}>{(user?.name ?? "G").slice(0, 2).toUpperCase()}</Text>
         </Pressable>
       </View>
@@ -94,6 +95,7 @@ export default function HomeScreen() {
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={colors.primary} />}
       >
         <View style={styles.hero}>
@@ -256,11 +258,16 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     backgroundColor: colors.surface,
   },
-  location: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flex: 1 },
+  // A same-width invisible spacer on the left balances the profile button on
+  // the right, so the location block below is centered on the header rather
+  // than left-aligned in the space next to the avatar.
+  headerSide: { width: 38 },
+  location: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, flex: 1 },
   pin: { width: 34, height: 34, borderRadius: radius.sm, backgroundColor: colors.primaryMuted, alignItems: "center", justifyContent: "center" },
   pinIcon: { color: colors.primary, fontSize: 14 },
+  locationText: { alignItems: "center", flexShrink: 1 },
   locationLabel: { ...typography.caption, fontSize: 9, letterSpacing: 1.1 },
-  locationName: { ...typography.bodyStrong, fontSize: 13 },
+  locationName: { ...typography.bodyStrong, fontSize: 13, textAlign: "center" },
   chevron: { color: colors.muted },
   profileButton: { width: 38, height: 38, borderRadius: radius.sm, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center" },
   profileText: { color: colors.white, fontSize: 11, fontWeight: "800" },
