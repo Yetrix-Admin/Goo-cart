@@ -58,8 +58,14 @@ module.exports = function withReleaseSigning(config) {
       /^\s*\/\/ Caution! In production.*\n\s*\/\/ see https:\/\/reactnative\.dev\/docs\/signed-apk-android\.\n\s*signingConfig signingConfigs\.debug$/m,
       RELEASE_SIGNING_BLOCK,
     );
+    // Also re-normalizes a block this plugin generated under a *previous*
+    // UPLOAD_* prefix (e.g. GOOCARTPARTNER_ before it was renamed to
+    // GOOCARTDELIVERY_) — without this, a stale prefix survives in the
+    // buildType's condition even though the signingConfigs.release block
+    // above was already updated, and Gradle fails release packaging with
+    // "SigningConfig 'release' is missing required property 'storeFile'".
     contents = contents.replace(
-      /^\s*signingConfig project\.hasProperty\('GOOCARTPARTNER_UPLOAD_STORE_FILE'\).*$/m,
+      /^(\s*)if \(project\.hasProperty\('\w+_UPLOAD_STORE_FILE'\)\) \{\n\s*signingConfig signingConfigs\.release\n\s*\} else if \(\(findProperty\('goocart\.allowDebugSigning'\) \?: 'false'\)\.toBoolean\(\)\) \{\n\s*\/\/ Explicit opt-in for local build verification only\. Never publish this artifact\.\n\s*signingConfig signingConfigs\.debug\n\s*\}$/m,
       RELEASE_SIGNING_BLOCK,
     );
 

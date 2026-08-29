@@ -118,7 +118,7 @@ $apps = @(
     DisplayName = "Goocart Delivery Partner"
     Package = "com.goocart.delivery"
     ArtifactName = "Goocart-Delivery"
-    SigningPrefix = "GOOCARTPARTNER_"
+    SigningPrefix = "GOOCARTDELIVERY_"
   }
 )
 
