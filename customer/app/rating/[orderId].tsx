@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -63,7 +63,8 @@ export default function RatingScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScreenHeader title="Rate Order" subtitle={order.restaurantName} />
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={typography.h2}>How was your food?</Text>
         <StarRating value={foodStars} onChange={setFoodStars} />
 
@@ -90,6 +91,7 @@ export default function RatingScreen() {
       <View style={styles.footer}>
         <PrimaryButton label="Submit Rating" onPress={() => void submit()} disabled={foodStars === 0} />
       </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

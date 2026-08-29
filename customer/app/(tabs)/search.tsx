@@ -43,7 +43,7 @@ export default function SearchScreen() {
       </View>
 
       {meta ? (
-        <ScrollView contentContainerStyle={styles.body}>
+        <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           <EmptyState
             icon={meta.icon}
             title={`${meta.label} is coming next`}
@@ -51,7 +51,7 @@ export default function SearchScreen() {
           />
         </ScrollView>
       ) : !query.trim() ? (
-        <ScrollView contentContainerStyle={styles.body}>
+        <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           <Text style={typography.h3}>Recent Searches</Text>
           <View style={styles.chipRow}>
             {RECENT_SEARCHES.map((term) => (
@@ -70,7 +70,7 @@ export default function SearchScreen() {
           </View>
         </ScrollView>
       ) : (
-        <ScrollView contentContainerStyle={styles.body}>
+        <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           {results && results.restaurants.length === 0 && results.items.length === 0 ? (
             <EmptyState icon="search" title="No results found" copy={`Nothing matches "${query}".`} />
           ) : (

@@ -157,7 +157,7 @@ export default function RestaurantScreen() {
         }
       />
 
-      <ScrollView contentContainerStyle={{ paddingBottom: totalItems > 0 ? 120 : spacing.xl }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: totalItems > 0 ? 120 : spacing.xl }} keyboardShouldPersistTaps="handled">
         <View style={styles.infoBlock}>
           <View style={styles.row}>
             <Text style={styles.rating}>★ {restaurant.rating.toFixed(1)}</Text>

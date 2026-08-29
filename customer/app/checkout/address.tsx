@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useRef, useState } from "react";
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -36,6 +36,13 @@ export default function AddressScreen() {
   const [locating, setLocating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const scrollRef = useRef<ScrollView>(null);
+  const formTopRef = useRef(0);
+  const fieldYRef = useRef<Record<string, number>>({});
+  const scrollToField = (key: string) => {
+    const y = formTopRef.current + (fieldYRef.current[key] ?? 0);
+    scrollRef.current?.scrollTo({ y: Math.max(0, y - 16), animated: true });
+  };
 
   const choose = (id: string) => {
     select(id);
@@ -110,7 +117,8 @@ export default function AddressScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScreenHeader title="Delivery Address" />
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {!showForm && (
           <>
             {loading && addresses.length === 0 ? <ActivityIndicator color={colors.primary} /> : null}
@@ -124,7 +132,7 @@ export default function AddressScreen() {
         )}
 
         {showForm && (
-          <View style={{ gap: spacing.md }}>
+          <View style={{ gap: spacing.md }} onLayout={(e) => { formTopRef.current = e.nativeEvent.layout.y; }}>
             <PrimaryButton
               label={locating ? "Locating…" : coords ? "Location captured ✓" : "Use Current Location"}
               variant={coords ? "outline" : undefined}
@@ -132,19 +140,21 @@ export default function AddressScreen() {
               disabled={locating}
             />
             <LabelPicker value={form.label} onChange={(label) => setForm({ ...form, label })} />
-            <Field label="House / Flat" value={form.house} onChangeText={(v) => setForm({ ...form, house: v })} />
-            <Field label="Building" value={form.building} onChangeText={(v) => setForm({ ...form, building: v })} />
-            <Field label="Street" value={form.street} onChangeText={(v) => setForm({ ...form, street: v })} />
-            <Field label="Landmark" value={form.landmark} onChangeText={(v) => setForm({ ...form, landmark: v })} />
-            <Field label="City" value={form.city} onChangeText={(v) => setForm({ ...form, city: v })} />
-            <Field label="Pincode" value={form.pincode} onChangeText={(v) => setForm({ ...form, pincode: v.replace(/[^0-9]/g, "").slice(0, 6) })} keyboardType="number-pad" />
-            <Field label="Contact Name" value={form.contactName} onChangeText={(v) => setForm({ ...form, contactName: v })} />
-            <Field label="Contact Number" value={form.contactPhone} onChangeText={(v) => setForm({ ...form, contactPhone: v.replace(/[^0-9]/g, "").slice(0, 10) })} keyboardType="number-pad" />
+            <Field label="House / Flat" value={form.house} onChangeText={(v) => setForm({ ...form, house: v })} onMeasured={(y) => { fieldYRef.current.house = y; }} onFocusRequest={() => scrollToField("house")} />
+            <Field label="Building" value={form.building} onChangeText={(v) => setForm({ ...form, building: v })} onMeasured={(y) => { fieldYRef.current.building = y; }} onFocusRequest={() => scrollToField("building")} />
+            <Field label="Street" value={form.street} onChangeText={(v) => setForm({ ...form, street: v })} onMeasured={(y) => { fieldYRef.current.street = y; }} onFocusRequest={() => scrollToField("street")} />
+            <Field label="Landmark" value={form.landmark} onChangeText={(v) => setForm({ ...form, landmark: v })} onMeasured={(y) => { fieldYRef.current.landmark = y; }} onFocusRequest={() => scrollToField("landmark")} />
+            <Field label="City" value={form.city} onChangeText={(v) => setForm({ ...form, city: v })} onMeasured={(y) => { fieldYRef.current.city = y; }} onFocusRequest={() => scrollToField("city")} />
+            <Field label="Pincode" value={form.pincode} onChangeText={(v) => setForm({ ...form, pincode: v.replace(/[^0-9]/g, "").slice(0, 6) })} keyboardType="number-pad" onMeasured={(y) => { fieldYRef.current.pincode = y; }} onFocusRequest={() => scrollToField("pincode")} />
+            <Field label="Contact Name" value={form.contactName} onChangeText={(v) => setForm({ ...form, contactName: v })} onMeasured={(y) => { fieldYRef.current.contactName = y; }} onFocusRequest={() => scrollToField("contactName")} />
+            <Field label="Contact Number" value={form.contactPhone} onChangeText={(v) => setForm({ ...form, contactPhone: v.replace(/[^0-9]/g, "").slice(0, 10) })} keyboardType="number-pad" onMeasured={(y) => { fieldYRef.current.contactPhone = y; }} onFocusRequest={() => scrollToField("contactPhone")} />
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <PrimaryButton label={saving ? "Saving…" : "Save Address"} onPress={() => void save()} disabled={saving} />
+            <View style={{ height: 220 }} />
           </View>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -162,11 +172,38 @@ function LabelPicker({ value, onChange }: { value: Address["label"]; onChange: (
   );
 }
 
-function Field({ label, value, onChangeText, keyboardType }: { label: string; value: string; onChangeText: (t: string) => void; keyboardType?: "default" | "number-pad" }) {
+function Field({
+  label,
+  value,
+  onChangeText,
+  keyboardType,
+  onMeasured,
+  onFocusRequest,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (t: string) => void;
+  keyboardType?: "default" | "number-pad";
+  onMeasured: (y: number) => void;
+  onFocusRequest: () => void;
+}) {
   return (
-    <View style={{ gap: 6 }}>
+    // Android's ScrollView doesn't auto-scroll a focused input above the
+    // keyboard the way iOS does, so fields near the bottom of a long form
+    // stay hidden behind the keyboard unless we scroll to them ourselves.
+    // onLayout (not measureLayout/findNodeHandle) is used because this app
+    // runs the New Architecture, where the legacy native-handle measurement
+    // path is unreliable.
+    <View style={{ gap: 6 }} onLayout={(e) => onMeasured(e.nativeEvent.layout.y)}>
       <Text style={typography.captionStrong}>{label}</Text>
-      <TextInput value={value} onChangeText={onChangeText} keyboardType={keyboardType} style={styles.input} placeholderTextColor={colors.muted} />
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        keyboardType={keyboardType}
+        style={styles.input}
+        placeholderTextColor={colors.muted}
+        onFocus={onFocusRequest}
+      />
     </View>
   );
 }

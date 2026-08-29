@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { EmptyState } from "@/components/EmptyState";
@@ -81,7 +81,8 @@ export default function CartScreen() {
         <Text style={typography.h1}>Your cart</Text>
         <Text style={styles.copy}>{restaurantName}</Text>
       </View>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.section}>
           {items.map((item) => (
             <View key={item.lineId} style={styles.itemRow}>
@@ -196,6 +197,7 @@ export default function CartScreen() {
       <View style={styles.footer}>
         <PrimaryButton label={`Proceed to Checkout • ₹${bill.total}`} onPress={proceedToCheckout} />
       </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

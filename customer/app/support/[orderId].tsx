@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -52,7 +52,8 @@ export default function SupportScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScreenHeader title="Get Help" />
-      <View style={styles.content}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={typography.h2}>What&apos;s wrong with this order?</Text>
         <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
           {SUPPORT_REASONS.map((r) => (
@@ -73,17 +74,18 @@ export default function SupportScreen() {
           multiline
           style={styles.textarea}
         />
-      </View>
+      </ScrollView>
       <View style={styles.footer}>
         <PrimaryButton label={busy ? "Submitting..." : "Submit"} onPress={() => void submit()} disabled={!reason || busy} />
       </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
-  content: { flex: 1, padding: spacing.xl },
+  content: { padding: spacing.xl, flexGrow: 1 },
   reasonRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md },
   reasonRowActive: { borderColor: colors.primary, backgroundColor: colors.primaryMuted },
   radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: colors.border, alignItems: "center", justifyContent: "center" },

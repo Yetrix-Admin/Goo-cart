@@ -116,6 +116,7 @@ export default function FoodHomeScreen() {
       <FlatList
         data={browsing ? filtered : []}
         keyExtractor={(item) => item.id}
+        keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={colors.primary} />}
         renderItem={({ item }) => (
           <View style={styles.listCard}>
