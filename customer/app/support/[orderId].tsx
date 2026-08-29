@@ -14,10 +14,20 @@ export default function SupportScreen() {
   const [reason, setReason] = useState<SupportReason | null>(null);
   const [details, setDetails] = useState("");
   const [ticket, setTicket] = useState<SupportTicket | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
-  const submit = () => {
+  const submit = async () => {
     if (!reason || !orderId) return;
-    setTicket(supportService.createTicket(orderId, reason, details.trim() || undefined));
+    setBusy(true);
+    setError("");
+    try {
+      setTicket(await supportService.createTicket(orderId, reason, details.trim() || undefined));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create support ticket");
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (ticket) {
@@ -30,7 +40,7 @@ export default function SupportScreen() {
           </View>
           <Text style={typography.h1}>Ticket created</Text>
           <Text style={styles.ticketId}>#{ticket.id}</Text>
-          <Text style={styles.copy}>Our team will review your {ticket.reason.toLowerCase()} report and follow up. This is a local demo ticket — no live agent is connected yet.</Text>
+          <Text style={styles.copy}>Our team will review your {ticket.reason.toLowerCase()} report and follow up.</Text>
         </View>
         <View style={styles.footer}>
           <PrimaryButton label="Back to Order" onPress={() => router.back()} />
@@ -54,6 +64,7 @@ export default function SupportScreen() {
         </View>
 
         <Text style={[typography.captionStrong, { marginTop: spacing.lg }]}>Tell us more (optional)</Text>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
         <TextInput
           value={details}
           onChangeText={setDetails}
@@ -64,7 +75,7 @@ export default function SupportScreen() {
         />
       </View>
       <View style={styles.footer}>
-        <PrimaryButton label="Submit" onPress={submit} disabled={!reason} />
+        <PrimaryButton label={busy ? "Submitting..." : "Submit"} onPress={() => void submit()} disabled={!reason || busy} />
       </View>
     </SafeAreaView>
   );
@@ -85,4 +96,5 @@ const styles = StyleSheet.create({
   checkIcon: { color: colors.white, fontSize: 28, fontWeight: "800" },
   ticketId: { ...typography.h2, color: colors.primary },
   copy: { ...typography.body, color: colors.muted, textAlign: "center", marginTop: spacing.sm },
+  error: { ...typography.caption, color: colors.error },
 });

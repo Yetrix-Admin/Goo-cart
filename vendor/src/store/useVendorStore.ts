@@ -29,6 +29,7 @@ type VendorState = {
   loadMenu: () => Promise<void>;
   createMenuItem: (input: CreateMenuItemInput) => Promise<FoodItem>;
   updateMenuItem: (id: string, patch: UpdateMenuItemInput) => Promise<FoodItem>;
+  clear: () => void;
 };
 
 // A brand-new vendor account has no restaurant until an admin links one via
@@ -76,4 +77,6 @@ export const useVendorStore = create<VendorState>((set, get) => ({
     set({ menu: get().menu.map((i) => (i.id === id ? data.item : i)) });
     return data.item;
   },
+
+  clear: () => set({ restaurant: null, restaurantLoaded: false, menu: [], loading: false, error: null }),
 }));

@@ -8,6 +8,7 @@ type OrdersState = {
   error: string | null;
   refresh: () => Promise<void>;
   transition: (id: string, to: FoodOrderStatus) => Promise<FoodOrder>;
+  clear: () => void;
 };
 
 // GET /api/v1/orders is already scoped server-side to this vendor's owned
@@ -32,4 +33,6 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     set({ orders: get().orders.map((o) => (o.id === id ? data.order : o)) });
     return data.order;
   },
+
+  clear: () => set({ orders: [], loading: false, error: null }),
 }));

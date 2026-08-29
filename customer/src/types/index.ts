@@ -238,9 +238,10 @@ export type SupportReason = (typeof SUPPORT_REASONS)[number];
 
 export type SupportTicket = {
   id: string;
-  orderId: string;
+  orderId: string | null;
   reason: SupportReason;
   details?: string;
+  status?: string;
   createdAt: string;
 };
 

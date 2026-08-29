@@ -2,6 +2,7 @@ import type { Server as HttpServer } from "node:http";
 import { Server, Socket } from "socket.io";
 import { userFromToken } from "./auth.js";
 import { Order, Restaurant } from "../models.js";
+import { corsOrigin } from "./cors.js";
 
 // --- Room naming (spec section 39) -----------------------------------------
 // customer:<customerId>   — that customer's own orders
@@ -35,7 +36,7 @@ const ADMIN_ROLES = ["SUPER_ADMIN", "OPERATIONS_ADMIN", "FINANCE_ADMIN", "SUPPOR
  */
 export function initRealtime(httpServer: HttpServer): Server {
   io = new Server(httpServer, {
-    cors: { origin: true, credentials: true },
+    cors: { origin: corsOrigin, credentials: true },
     // Mobile networks flap; a slightly longer ping window avoids spurious
     // reconnect storms on cellular data.
     pingInterval: 20_000,

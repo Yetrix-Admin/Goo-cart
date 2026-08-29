@@ -11,8 +11,18 @@
 const DEFAULT_API = "http://localhost:3001";
 
 function apiBase(): string {
-  const configured = process.env.GOOCART_API_URL;
-  return (configured || DEFAULT_API).replace(/\/$/, "");
+  const configured = process.env.GOOCART_API_URL?.trim();
+  if (!configured && process.env.NODE_ENV === "production") {
+    throw new Error("GOOCART_API_URL is required in production.");
+  }
+
+  const value = (configured || DEFAULT_API).replace(/\/$/, "");
+  const parsed = new URL(value);
+  const isLocal = ["localhost", "127.0.0.1", "0.0.0.0"].includes(parsed.hostname) || parsed.hostname.startsWith("192.168.") || parsed.hostname.startsWith("10.");
+  if (process.env.NODE_ENV === "production" && isLocal) {
+    throw new Error("GOOCART_API_URL must be a deployed production API URL, not a local/development address.");
+  }
+  return value;
 }
 
 async function forward(request: Request): Promise<Response> {

@@ -369,6 +369,8 @@ const auditLogSchema = new Schema(
     entityId: String,
     before: Schema.Types.Mixed,
     after: Schema.Types.Mixed,
+    changedFields: { type: [String], default: [] },
+    requestId: { type: String, default: null },
   },
   opts,
 );
@@ -502,6 +504,33 @@ const reservationSchema = new Schema(
 );
 reservationSchema.index({ status: 1, expiresAt: 1 });
 
+const orderRatingSchema = new Schema(
+  {
+    orderId: { type: Schema.Types.ObjectId, ref: "Order", required: true, index: true },
+    customerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    restaurantId: { type: Schema.Types.ObjectId, ref: "Restaurant", required: true, index: true },
+    foodStars: { type: Number, required: true, min: 1, max: 5 },
+    restaurantStars: { type: Number, required: true, min: 1, max: 5 },
+    deliveryPartnerStars: { type: Number, min: 0, max: 5, default: 0 },
+    comment: { type: String, default: "" },
+  },
+  opts,
+);
+orderRatingSchema.index({ orderId: 1, customerId: 1 }, { unique: true });
+
+const supportTicketSchema = new Schema(
+  {
+    ticketNumber: { type: String, required: true, unique: true, index: true },
+    customerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    orderId: { type: Schema.Types.ObjectId, ref: "Order", default: null, index: true },
+    category: { type: String, required: true },
+    subject: { type: String, required: true },
+    message: { type: String, default: "" },
+    status: { type: String, enum: ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"], default: "OPEN", index: true },
+  },
+  opts,
+);
+
 export const Product = model("Product", productSchema);
 export const Reservation = model("Reservation", reservationSchema);
 export const ServiceOrder = model("ServiceOrder", serviceOrderSchema);
@@ -523,6 +552,8 @@ export const AuditLog = model("AuditLog", auditLogSchema);
 export const Counter = model("Counter", counterSchema);
 export const DeviceToken = model("DeviceToken", deviceTokenSchema);
 export const Notification = model("Notification", notificationSchema);
+export const OrderRating = model("OrderRating", orderRatingSchema);
+export const SupportTicket = model("SupportTicket", supportTicketSchema);
 
 export type UserDoc = InferSchemaType<typeof userSchema> & { _id: mongoose.Types.ObjectId };
 export type RestaurantDoc = InferSchemaType<typeof restaurantSchema> & { _id: mongoose.Types.ObjectId };

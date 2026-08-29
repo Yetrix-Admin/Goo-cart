@@ -1,22 +1,15 @@
 import { SupportReason, SupportTicket } from "@/types";
-
-let ticketSequence = 100000 + Math.floor(Math.random() * 500);
+import { apiPost } from "./apiClient";
 
 export interface SupportServiceInterface {
-  createTicket(orderId: string, reason: SupportReason, details?: string): SupportTicket;
+  createTicket(orderId: string, reason: SupportReason, details?: string): Promise<SupportTicket>;
 }
 
-class MockSupportService implements SupportServiceInterface {
-  createTicket(orderId: string, reason: SupportReason, details?: string): SupportTicket {
-    ticketSequence += 1;
-    return {
-      id: `SUP-${ticketSequence}`,
-      orderId,
-      reason,
-      details,
-      createdAt: new Date().toISOString(),
-    };
+class ApiSupportService implements SupportServiceInterface {
+  async createTicket(orderId: string, reason: SupportReason, details?: string): Promise<SupportTicket> {
+    const data = await apiPost<{ ticket: SupportTicket }>("/api/v1/customer/support-tickets", { orderId, reason, details });
+    return data.ticket;
   }
 }
 
-export const supportService: SupportServiceInterface = new MockSupportService();
+export const supportService: SupportServiceInterface = new ApiSupportService();

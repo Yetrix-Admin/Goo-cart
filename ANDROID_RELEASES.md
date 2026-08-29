@@ -105,7 +105,23 @@ npx eas-cli build --platform android --profile production-apk
 
 ## Release-only external configuration
 
-The Customer tracking map still needs real restricted Google Maps keys in
-`customer/app.json`; the committed placeholders intentionally prevent secrets
-from entering Git. Restrict the Android key to `com.goocart.customer` plus the
-release certificate SHA-1 before publishing.
+The Customer tracking map needs real restricted Google Maps keys, but those
+keys must not be committed to Git. `customer/app.json` keeps placeholders and
+`customer/app.config.js` reads the release values from environment variables:
+
+```properties
+GOOCART_ANDROID_GOOGLE_MAPS_API_KEY=<restricted Android Maps key>
+GOOCART_IOS_GOOGLE_MAPS_API_KEY=<restricted iOS Maps key>
+```
+
+For Android, restrict the key in Google Cloud Console to:
+
+- Android application package: `com.goocart.customer`
+- Release upload/app-signing certificate SHA-1
+
+For iOS, restrict the iOS key to bundle id `com.goocart.customer`.
+
+Only enable the APIs actually required by Goocart's mobile map experience,
+such as Maps SDK for Android/iOS. Do not place server-side secrets in Expo
+configuration; client mobile keys are embedded in the app and must be protected
+primarily by Google Cloud restrictions.

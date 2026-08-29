@@ -2,6 +2,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { apiPost, markAuthReady, setAuthToken } from "@/services/apiClient";
 import { registerForPushNotifications } from "@/services/PushService";
+import { disconnectSocket } from "@/services/socket";
+import { useOrdersStore } from "@/store/useOrdersStore";
+import { useVendorStore } from "@/store/useVendorStore";
 import { VendorUser } from "@/types";
 
 const STORAGE_KEY = "goocart.vendor.auth.v1";
@@ -60,8 +63,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
+    disconnectSocket();
     setAuthToken(null);
     await AsyncStorage.removeItem(STORAGE_KEY);
+    useOrdersStore.getState().clear();
+    useVendorStore.getState().clear();
     set({ user: null, token: null });
   },
 }));

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { AuditLog, Coupon, FoodItem, Order, PricingRule, Product, Restaurant, ServiceOrder, Session, User } from "../models.js";
+import { AuditLog, Coupon, FoodItem, Order, PricingRule, Product, Restaurant, ServiceOrder, Session, SupportTicket, User } from "../models.js";
 import { requireRole, canAdmin, hashPassword, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
 import { toFoodItemDTO, toRestaurantDTO } from "./catalog.js";
@@ -14,6 +14,7 @@ import { getAutomationSettings, updateAutomationSettings } from "../lib/automati
 import { createFoodItem, updateFoodItem, MenuItemError } from "../lib/menuItems.js";
 import { EMAIL_RE, PHONE_RE } from "../lib/http.js";
 import { sendWelcomeEmail } from "../lib/email.js";
+import { writeAuditLog } from "../lib/audit.js";
 
 export const adminRouter = Router();
 adminRouter.use(requireRole(canAdmin, "Admin access required"));
@@ -21,7 +22,7 @@ adminRouter.use(requireRole(canAdmin, "Admin access required"));
 const VENDOR_ROLES = ["VENDOR_OWNER", "VENDOR_MANAGER", "VENDOR_STAFF"];
 
 async function audit(req: AuthedRequest, action: string, entityType: string, entityId: string, before: unknown, after: unknown) {
-  await AuditLog.create({ actorId: req.user!._id, actorRole: req.user!.role, action, entityType, entityId, before, after });
+  await writeAuditLog({ actor: req.user, action, entityType, entityId, before, after, requestId: req.header("x-request-id") ?? null });
 }
 
 // --- Customers (spec sections 9) -------------------------------------------
@@ -757,6 +758,61 @@ adminRouter.get("/audit-logs", async (req, res) => {
     );
   } catch (e) {
     res.status(500).json(fail("AUDIT_LOG_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load the audit log"));
+  }
+});
+
+adminRouter.get("/support-tickets", async (_req, res) => {
+  try {
+    const tickets = await SupportTicket.find().sort({ createdAt: -1 }).limit(250).lean();
+    const customerIds = tickets.map((ticket: any) => ticket.customerId).filter(Boolean);
+    const orderIds = tickets.map((ticket: any) => ticket.orderId).filter(Boolean);
+    const [customers, orders] = await Promise.all([
+      User.find({ _id: { $in: customerIds } }, { name: 1, email: 1, phone: 1 }).lean(),
+      Order.find({ _id: { $in: orderIds } }, { orderNumber: 1, status: 1, bill: 1 }).lean(),
+    ]);
+    const customerMap = new Map(customers.map((customer: any) => [String(customer._id), customer]));
+    const orderMap = new Map(orders.map((order: any) => [String(order._id), order]));
+    res.json(
+      ok({
+        tickets: tickets.map((ticket: any) => {
+          const customer = customerMap.get(String(ticket.customerId));
+          const order = ticket.orderId ? orderMap.get(String(ticket.orderId)) : null;
+          return {
+            id: String(ticket._id),
+            ticketNumber: ticket.ticketNumber,
+            customerId: String(ticket.customerId),
+            customerName: customer?.name ?? "Customer",
+            customerContact: customer?.email ?? customer?.phone ?? "",
+            orderId: ticket.orderId ? String(ticket.orderId) : null,
+            orderNumber: order?.orderNumber ?? null,
+            orderStatus: order?.status ?? null,
+            category: ticket.category,
+            subject: ticket.subject,
+            message: ticket.message ?? "",
+            status: ticket.status,
+            createdAt: ticket.createdAt,
+            updatedAt: ticket.updatedAt,
+          };
+        }),
+      }),
+    );
+  } catch (e) {
+    res.status(500).json(fail("SUPPORT_TICKETS_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load support tickets"));
+  }
+});
+
+adminRouter.patch("/support-tickets/:id/status", async (req: AuthedRequest, res) => {
+  try {
+    const status = String(req.body?.status ?? "").toUpperCase();
+    if (!["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"].includes(status)) return res.status(400).json(fail("INVALID_STATUS", "Choose a valid ticket status"));
+    const before = await SupportTicket.findById(req.params.id).lean();
+    if (!before) return res.status(404).json(fail("TICKET_NOT_FOUND", "Support ticket not found"));
+    const ticket: any = await SupportTicket.findByIdAndUpdate(req.params.id, { $set: { status } }, { new: true }).lean();
+    await audit(req, "support_ticket.status", "support_ticket", req.params.id, before, ticket);
+    emitToAdmin("support_ticket:updated", { id: req.params.id, status });
+    res.json(ok({ ticket: { id: String(ticket._id), ticketNumber: ticket.ticketNumber, status: ticket.status } }, "Support ticket updated"));
+  } catch (e) {
+    res.status(500).json(fail("SUPPORT_TICKET_UPDATE_FAILED", e instanceof Error ? e.message : "Could not update support ticket"));
   }
 });
 

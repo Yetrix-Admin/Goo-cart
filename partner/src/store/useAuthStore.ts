@@ -4,6 +4,7 @@ import { apiPost, markAuthReady, setAuthToken } from "@/services/apiClient";
 import { stopLocationTracking } from "@/services/LocationTracker";
 import { disconnectSocket } from "@/services/socket";
 import { registerForPushNotifications } from "@/services/PushService";
+import { useOrdersStore } from "@/store/useOrdersStore";
 import { PartnerUser } from "@/types";
 
 const STORAGE_KEY = "goocart.partner.auth.v1";
@@ -61,6 +62,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     disconnectSocket();
     setAuthToken(null);
     await AsyncStorage.removeItem(STORAGE_KEY);
+    useOrdersStore.getState().clear();
     set({ user: null, token: null });
   },
 }));

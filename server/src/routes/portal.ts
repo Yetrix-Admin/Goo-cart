@@ -18,6 +18,8 @@ import { canTransition, type OrderStatus } from "../lib/orderState.js";
 import { ok, fail } from "../lib/http.js";
 import { getPricingSettings } from "../lib/pricingSettings.js";
 import { reserveLines, consumeReservations, releaseReservations } from "../lib/inventory.js";
+import { writeAuditLog } from "../lib/audit.js";
+import { claimDelivery } from "../lib/delivery.js";
 
 export const portalRouter = Router();
 
@@ -26,7 +28,7 @@ const SERVICES = [...COMMERCE, "Bike Taxi", "Parcel"];
 const TERMINAL = ["DELIVERED", "COMPLETED", "CANCELLED_BY_ADMIN", "CANCELLED_BY_CUSTOMER", "VENDOR_REJECTED"];
 
 async function audit(user: any, action: string, entityType: string, entityId: string, before: unknown, after: unknown) {
-  await AuditLog.create({ actorId: user._id, actorRole: user.role, action, entityType, entityId, before, after });
+  await writeAuditLog({ actor: user, action, entityType, entityId, before, after });
 }
 
 // --- Snapshot -------------------------------------------------------------
@@ -97,14 +99,15 @@ async function buildSnapshot(user: any) {
   const partner = canPartner(user);
   const owned = await ownedRestaurantIds(user);
 
-  // Order scoping mirrors the D1 rules: customers see their own, vendors their
-  // store's, partners their assigned work plus the unclaimed pool.
+  // Partners see only work already assigned to them plus food delivery offers
+  // explicitly broadcast to them. Knowing an order id must never be enough to
+  // self-assign an arbitrary ready order.
   const foodFilter = admin
     ? {}
     : vendor
       ? { restaurantId: { $in: owned } }
       : partner
-        ? { $or: [{ partnerId: user._id }, { partnerId: null, status: "READY_FOR_PICKUP" }] }
+        ? { $or: [{ partnerId: user._id }, { partnerId: null, deliveryOfferStatus: "OFFERING", deliveryOfferedPartnerIds: user._id, deliveryOfferExpiresAt: { $gt: new Date() } }] }
         : { customerId: user._id };
 
   const serviceFilter = admin
@@ -138,6 +141,7 @@ async function buildSnapshot(user: any) {
     const key = String(s._id).startsWith("partner_online:") ? "partner_online" : String(s._id).startsWith("vendor_open:") ? "vendor_open" : String(s._id);
     settingMap[key] = String(s.value);
   }
+  if (partner) settingMap.partner_online = user.partnerOnline ? "true" : "false";
 
   return {
     actor: { id: String(user._id), email: user.email, name: user.name, role: user.role, status: user.status },
@@ -265,7 +269,9 @@ portalRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
 
       case "partner.toggle": {
         if (!canPartner(user)) return res.status(403).json(fail("FORBIDDEN", "Partner access required"));
-        await Setting.findByIdAndUpdate(`partner_online:${user._id}`, { value: body.value ? "true" : "false" }, { upsert: true });
+        await User.updateOne({ _id: user._id }, { $set: { partnerOnline: Boolean(body.value), ...(body.value ? {} : { partnerBusy: false }) } });
+        user.partnerOnline = Boolean(body.value);
+        if (!body.value) user.partnerBusy = false;
         return res.json(ok(await buildSnapshot(user), body.value ? "You are online" : "You are offline"));
       }
 
@@ -494,8 +500,24 @@ async function transitionDoc(
 
   const claiming = group === "partner" && ["DELIVERY_PARTNER_ASSIGNED", "DRIVER_ASSIGNED", "PARTNER_ASSIGNED"].includes(to);
   if (claiming) {
-    const online = await Setting.findById(`partner_online:${user._id}`).lean();
-    if (!online || String((online as any).value) !== "true") {
+    if (Model === Order) {
+      const result = await claimDelivery(String(doc._id), user);
+      if (!result.ok) {
+        const messages: Record<string, [number, string]> = {
+          ORDER_NOT_FOUND: [404, "Order not found"],
+          OFFER_EXPIRED: [409, "This delivery offer has expired."],
+          ORDER_ALREADY_ASSIGNED: [409, "This delivery has already been accepted by another delivery partner."],
+          PARTNER_NOT_ELIGIBLE: [409, "Go online before accepting a delivery."],
+          PARTNER_HAS_ACTIVE_TASK: [409, "Complete your current task before accepting another."],
+        };
+        const [status, message] = messages[result.code] ?? [500, "Could not accept this delivery."];
+        return { ok: false, status, code: result.code, message };
+      }
+      await audit(user, "order.transition", "food_order", String(doc._id), { status: from }, { status: "DELIVERY_PARTNER_ASSIGNED" });
+      return { ok: true };
+    }
+    const partnerUser: any = await User.findById(user._id, { partnerOnline: 1, partnerBusy: 1, status: 1, partnerApprovalStatus: 1 }).lean();
+    if (!partnerUser?.partnerOnline) {
       return { ok: false, status: 409, code: "PARTNER_OFFLINE", message: "Go online before accepting a request" };
     }
     const busy =

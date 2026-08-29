@@ -17,6 +17,7 @@ import { fail, ok } from "./lib/http.js";
 import { initRealtime } from "./lib/realtime.js";
 import { startAcceptanceWatchdog } from "./lib/acceptanceWatchdog.js";
 import { startReservationWatchdog } from "./lib/inventory.js";
+import { corsOrigin } from "./lib/cors.js";
 
 dotenv.config();
 // Local secrets can be split from the Atlas connection file. Both files are
@@ -25,15 +26,15 @@ dotenv.config({ path: ".env.email", override: true });
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
+app.set("trust proxy", 1);
 
 // Browsers are restricted to the configured origins; native apps send no
-// Origin header and are unaffected. Unset ALLOWED_ORIGINS means allow all,
-// which suits local development only.
-const allowed = (process.env.ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+// Origin header and are unaffected. In production, ALLOWED_ORIGINS must be
+// explicit for browser clients because credentials are enabled.
 app.use(
   cors({
     credentials: true,
-    origin: allowed.length ? (origin, cb) => cb(null, !origin || allowed.includes(origin)) : true,
+    origin: corsOrigin,
   }),
 );
 app.use(express.json({ limit: "1mb" }));

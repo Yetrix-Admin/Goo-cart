@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { AuditLog, PricingRule, Product, ServiceConfig, ServiceOrder, User, nextSequence } from "../models.js";
+import { AuditLog, Order, OrderRating, PricingRule, Product, Restaurant, ServiceConfig, ServiceOrder, SupportTicket, User, nextSequence } from "../models.js";
 import { requireAuth, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
 import { isValidCoordinate } from "../lib/geo.js";
@@ -7,6 +7,8 @@ import { getPricingSettings } from "../lib/pricingSettings.js";
 import { reserveLines, consumeReservations, releaseReservations } from "../lib/inventory.js";
 
 export const customerRouter = Router();
+
+const SUPPORT_REASONS = new Set(["Order delayed", "Missing item", "Wrong item", "Food quality issue", "Payment issue", "Delivery partner issue", "Refund issue", "Other"]);
 
 // Addresses are looked up fresh from the user document (never trusted from
 // the request) so a customer can only ever read or edit their own.
@@ -120,6 +122,112 @@ customerRouter.delete("/addresses/:id", requireAuth, async (req: AuthedRequest, 
     res.json(ok(null, "Address removed"));
   } catch (e) {
     res.status(500).json(fail("ADDRESS_DELETE_FAILED", e instanceof Error ? e.message : "Could not remove this address"));
+  }
+});
+
+customerRouter.post("/ratings", requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const body = req.body ?? {};
+    const order: any = await Order.findOne({ _id: body.orderId, customerId: req.user!._id }).lean().catch(() => null);
+    if (!order) return res.status(404).json(fail("ORDER_NOT_FOUND", "Order not found"));
+    if (order.status !== "DELIVERED") return res.status(409).json(fail("ORDER_NOT_DELIVERED", "You can rate an order only after it is delivered."));
+
+    const foodStars = Math.floor(Number(body.foodStars));
+    const restaurantStars = Math.floor(Number(body.restaurantStars));
+    const deliveryPartnerStars = Math.floor(Number(body.deliveryPartnerStars) || 0);
+    if (![foodStars, restaurantStars].every((n) => Number.isInteger(n) && n >= 1 && n <= 5) || deliveryPartnerStars < 0 || deliveryPartnerStars > 5) {
+      return res.status(400).json(fail("INVALID_RATING", "Ratings must be between 1 and 5 stars."));
+    }
+
+    const rating: any = await OrderRating.findOneAndUpdate(
+      { orderId: order._id, customerId: req.user!._id },
+      {
+        $set: {
+          restaurantId: order.restaurantId,
+          foodStars,
+          restaurantStars,
+          deliveryPartnerStars,
+          comment: String(body.comment ?? "").trim().slice(0, 1000),
+        },
+      },
+      { upsert: true, new: true },
+    );
+
+    const stats = await OrderRating.aggregate([
+      { $match: { restaurantId: order.restaurantId } },
+      { $group: { _id: "$restaurantId", rating: { $avg: "$restaurantStars" }, ratingCount: { $sum: 1 } } },
+    ]);
+    if (stats[0]) {
+      await Restaurant.updateOne({ _id: order.restaurantId }, { $set: { rating: Math.round(stats[0].rating * 10) / 10, ratingCount: stats[0].ratingCount } });
+    }
+
+    res.json(
+      ok(
+        {
+          rating: {
+            orderId: String(rating.orderId),
+            foodStars: rating.foodStars,
+            restaurantStars: rating.restaurantStars,
+            deliveryPartnerStars: rating.deliveryPartnerStars,
+            comment: rating.comment || undefined,
+            createdAt: rating.createdAt,
+          },
+        },
+        "Rating saved",
+      ),
+    );
+  } catch (e) {
+    res.status(500).json(fail("RATING_FAILED", e instanceof Error ? e.message : "Could not save rating"));
+  }
+});
+
+customerRouter.get("/ratings", requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const ratings = await OrderRating.find({ customerId: req.user!._id }).sort({ createdAt: -1 }).lean();
+    res.json(
+      ok({
+        ratings: ratings.map((r: any) => ({
+          orderId: String(r.orderId),
+          foodStars: r.foodStars,
+          restaurantStars: r.restaurantStars,
+          deliveryPartnerStars: r.deliveryPartnerStars,
+          comment: r.comment || undefined,
+          createdAt: r.createdAt,
+        })),
+      }),
+    );
+  } catch (e) {
+    res.status(500).json(fail("RATINGS_UNAVAILABLE", e instanceof Error ? e.message : "Could not load ratings"));
+  }
+});
+
+customerRouter.post("/support-tickets", requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const reason = String(req.body?.reason ?? "");
+    if (!SUPPORT_REASONS.has(reason)) return res.status(400).json(fail("INVALID_SUPPORT_REASON", "Choose a valid support reason."));
+
+    let orderId = null;
+    if (req.body?.orderId) {
+      const order = await Order.findOne({ _id: req.body.orderId, customerId: req.user!._id }, { _id: 1 }).lean().catch(() => null);
+      if (!order) return res.status(404).json(fail("ORDER_NOT_FOUND", "Order not found"));
+      orderId = order._id;
+    }
+
+    const seq = await nextSequence("supportTicketNumber");
+    const ticketNumber = `SUP-${new Date().getFullYear()}-${String(seq).padStart(6, "0")}`;
+    const message = String(req.body?.details ?? req.body?.message ?? "").trim().slice(0, 2000);
+    const ticket: any = await SupportTicket.create({
+      ticketNumber,
+      customerId: req.user!._id,
+      orderId,
+      category: reason,
+      subject: reason,
+      message,
+    });
+    await AuditLog.create({ actorId: req.user!._id, actorRole: req.user!.role, action: "support_ticket.create", entityType: "support_ticket", entityId: String(ticket._id), after: { ticketNumber, category: reason } });
+    res.json(ok({ ticket: { id: ticket.ticketNumber, orderId: ticket.orderId ? String(ticket.orderId) : null, reason: ticket.category, details: ticket.message || undefined, status: ticket.status, createdAt: ticket.createdAt } }, "Support ticket created"));
+  } catch (e) {
+    res.status(500).json(fail("SUPPORT_TICKET_FAILED", e instanceof Error ? e.message : "Could not create support ticket"));
   }
 });
 
