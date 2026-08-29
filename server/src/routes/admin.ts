@@ -6,6 +6,7 @@ import { toFoodItemDTO, toRestaurantDTO } from "./catalog.js";
 import { toOrderDTO } from "./orders.js";
 import { VENDOR_PERMISSIONS, TERMINAL_STATUSES } from "../lib/orderState.js";
 import { isValidCoordinate } from "../lib/geo.js";
+import { geocodeAddress } from "../lib/geocode.js";
 import { emitToAdmin } from "../lib/realtime.js";
 import { notifyUser } from "../lib/push.js";
 import { unassignPartner } from "../lib/delivery.js";
@@ -187,8 +188,10 @@ adminRouter.post("/restaurants", async (req: AuthedRequest, res) => {
     const ownerUsername = body.ownerUsername ? String(body.ownerUsername).trim().toLowerCase() : undefined;
     const initialPassword = String(body.initialPassword ?? "");
     const commissionPercent = body.commissionPercent !== undefined && body.commissionPercent !== null && body.commissionPercent !== "" ? Number(body.commissionPercent) : null;
+    const address = String(body.address ?? "").trim();
+    const area = String(body.area ?? "").trim();
     if (name.length < 2) return res.status(400).json(fail("INVALID_NAME", "Enter a business name."));
-    if (!isValidCoordinate(body.latitude, body.longitude)) return res.status(400).json(fail("INVALID_LOCATION", "A valid latitude and longitude are required."));
+    if (!address) return res.status(400).json(fail("INVALID_ADDRESS", "Enter the vendor's address."));
     if (ownerName.length < 2) return res.status(400).json(fail("INVALID_OWNER_NAME", "Enter the owner's full name."));
     if (!EMAIL_RE.test(ownerEmail)) return res.status(400).json(fail("INVALID_OWNER_EMAIL", "Enter a valid owner email."));
     if (ownerPhone && !PHONE_RE.test(ownerPhone)) return res.status(400).json(fail("INVALID_OWNER_PHONE", "Enter a valid owner phone number."));
@@ -198,6 +201,13 @@ adminRouter.post("/restaurants", async (req: AuthedRequest, res) => {
     if (await User.exists({ email: ownerEmail })) return res.status(409).json(fail("EMAIL_TAKEN", "An account with this owner email already exists."));
     if (ownerUsername && (await User.exists({ username: ownerUsername }))) return res.status(409).json(fail("USERNAME_TAKEN", "This username is already in use."));
 
+    // Coordinates are derived from the address instead of asking an admin to
+    // look them up manually — see lib/geocode.ts.
+    const location = await geocodeAddress([address, area].filter(Boolean).join(", "));
+    if (!location || !isValidCoordinate(location.latitude, location.longitude)) {
+      return res.status(400).json(fail("GEOCODE_FAILED", "Could not determine this vendor's location from the address. Try adding more detail (landmark, city, pincode)."));
+    }
+
     const slugBase = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "vendor";
     let slug = slugBase;
     if (await Restaurant.exists({ slug })) slug = `${slugBase}-${Date.now().toString(36)}`;
@@ -206,10 +216,10 @@ adminRouter.post("/restaurants", async (req: AuthedRequest, res) => {
       slug,
       name,
       imageUrl: body.imageUrl || null,
-      area: String(body.area ?? ""),
-      address: String(body.address ?? ""),
-      latitude: body.latitude,
-      longitude: body.longitude,
+      area,
+      address,
+      latitude: location.latitude,
+      longitude: location.longitude,
       businessType: body.businessType ?? null,
       gst: body.gst ?? null,
       pan: body.pan ?? null,
@@ -260,26 +270,38 @@ adminRouter.post("/restaurants", async (req: AuthedRequest, res) => {
   }
 });
 
-const EDITABLE_RESTAURANT_FIELDS = ["name", "imageUrl", "area", "address", "latitude", "longitude", "businessType", "gst", "pan", "bankDetails", "commissionPercent", "openingTime", "closingTime", "serviceRadiusKm", "autoAcceptanceMode", "temporaryBusyMode", "maxSimultaneousOrders", "averagePreparationMinutes", "maximumQueue"];
+const EDITABLE_RESTAURANT_FIELDS = ["name", "imageUrl", "area", "address", "businessType", "gst", "pan", "bankDetails", "commissionPercent", "openingTime", "closingTime", "serviceRadiusKm", "autoAcceptanceMode", "temporaryBusyMode", "maxSimultaneousOrders", "averagePreparationMinutes", "maximumQueue"];
 
 adminRouter.patch("/restaurants/:id", async (req: AuthedRequest, res) => {
   try {
     const restaurant = await Restaurant.findById(req.params.id);
     if (!restaurant) return res.status(404).json(fail("RESTAURANT_NOT_FOUND", "Restaurant not found"));
 
-    if (req.body?.latitude !== undefined || req.body?.longitude !== undefined) {
-      const latitude = req.body?.latitude !== undefined ? req.body.latitude : restaurant.latitude;
-      const longitude = req.body?.longitude !== undefined ? req.body.longitude : restaurant.longitude;
-      if (!isValidCoordinate(latitude, longitude)) return res.status(400).json(fail("INVALID_LOCATION", "A valid latitude and longitude are required."));
-    }
     if (req.body?.commissionPercent !== undefined && req.body.commissionPercent !== null) {
       const commissionPercent = Number(req.body.commissionPercent);
       if (!Number.isFinite(commissionPercent) || commissionPercent < 0 || commissionPercent > 100) return res.status(400).json(fail("INVALID_COMMISSION", "Commission rate must be between 0 and 100."));
     }
 
+    // Coordinates are derived from the address, not editable directly — see
+    // lib/geocode.ts. Re-geocode only when the address/area actually changed.
+    let newLocation: { latitude: number; longitude: number } | null = null;
+    if (req.body?.address !== undefined || req.body?.area !== undefined) {
+      const address = req.body?.address !== undefined ? String(req.body.address).trim() : restaurant.address;
+      const area = req.body?.area !== undefined ? String(req.body.area).trim() : restaurant.area;
+      if (!address) return res.status(400).json(fail("INVALID_ADDRESS", "Enter the vendor's address."));
+      newLocation = await geocodeAddress([address, area].filter(Boolean).join(", "));
+      if (!newLocation || !isValidCoordinate(newLocation.latitude, newLocation.longitude)) {
+        return res.status(400).json(fail("GEOCODE_FAILED", "Could not determine this vendor's location from the address. Try adding more detail (landmark, city, pincode)."));
+      }
+    }
+
     const before = restaurant.toObject();
     for (const field of EDITABLE_RESTAURANT_FIELDS) {
       if (req.body?.[field] !== undefined) (restaurant as any)[field] = req.body[field];
+    }
+    if (newLocation) {
+      restaurant.latitude = newLocation.latitude;
+      restaurant.longitude = newLocation.longitude;
     }
     await restaurant.save();
     await audit(req, "vendor.edit", "restaurant", req.params.id, before, restaurant.toObject());

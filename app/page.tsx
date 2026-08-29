@@ -303,13 +303,13 @@ function PrimaryActionButton({label,onClick}:{label:string;onClick:()=>void}){re
 function FlowSteps({steps}:{steps:[string,string,string][]}){return <div className="flow-steps">{steps.map((step)=><article key={step[0]}><i>{step[0]}</i><span><b>{step[1]}</b><small>{step[2]}</small></span></article>)}</div>;}
 
 function CreateVendorForm({onCreated}:{onCreated:()=>void}){
-  const [form,setForm]=useState({name:"",imageUrl:"",area:"",address:"",latitude:"",longitude:"",businessType:"",commissionPercent:"",ownerName:"",ownerUsername:"",ownerEmail:"",ownerPhone:"",initialPassword:"",manualOrderAcceptance:true});
+  const [form,setForm]=useState({name:"",imageUrl:"",area:"",address:"",businessType:"",commissionPercent:"",ownerName:"",ownerUsername:"",ownerEmail:"",ownerPhone:"",initialPassword:"",manualOrderAcceptance:true});
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const [created,setCreated]=useState<{name:string;vendorId:string;username:string;email:string;password:string}|null>(null);
   const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
     try{
-      const res=await adminApi<{restaurant:{id:string}}>("/restaurants",{method:"POST",body:JSON.stringify({name:form.name,imageUrl:form.imageUrl||null,area:form.area,address:form.address,latitude:Number(form.latitude),longitude:Number(form.longitude),businessType:form.businessType||null,commissionPercent:form.commissionPercent===""?null:Number(form.commissionPercent),ownerName:form.ownerName,ownerUsername:form.ownerUsername||undefined,ownerEmail:form.ownerEmail,ownerPhone:form.ownerPhone||undefined,initialPassword:form.initialPassword,manualOrderAcceptance:form.manualOrderAcceptance})});
+      const res=await adminApi<{restaurant:{id:string}}>("/restaurants",{method:"POST",body:JSON.stringify({name:form.name,imageUrl:form.imageUrl||null,area:form.area,address:form.address,businessType:form.businessType||null,commissionPercent:form.commissionPercent===""?null:Number(form.commissionPercent),ownerName:form.ownerName,ownerUsername:form.ownerUsername||undefined,ownerEmail:form.ownerEmail,ownerPhone:form.ownerPhone||undefined,initialPassword:form.initialPassword,manualOrderAcceptance:form.manualOrderAcceptance})});
       setCreated({name:form.name,vendorId:res.restaurant.id,username:form.ownerUsername,email:form.ownerEmail,password:form.initialPassword});
       onCreated();
     }catch(e){setError(e instanceof Error?e.message:"Could not create vendor");}finally{setBusy(false);}
@@ -323,8 +323,6 @@ function CreateVendorForm({onCreated}:{onCreated:()=>void}){
     <label>Business (shop / restaurant) name<input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></label>
     <label>Address<input required value={form.address} onChange={(e)=>setForm({...form,address:e.target.value})}/></label>
     <label>Area<input required value={form.area} onChange={(e)=>setForm({...form,area:e.target.value})}/></label>
-    <label>Latitude<input required type="number" step="any" value={form.latitude} onChange={(e)=>setForm({...form,latitude:e.target.value})}/></label>
-    <label>Longitude<input required type="number" step="any" value={form.longitude} onChange={(e)=>setForm({...form,longitude:e.target.value})}/></label>
     <label>Business type<input value={form.businessType} onChange={(e)=>setForm({...form,businessType:e.target.value})}/></label>
     <label>Commission rate (%)<input type="number" min="0" max="100" step="0.1" placeholder="Platform default" value={form.commissionPercent} onChange={(e)=>setForm({...form,commissionPercent:e.target.value})}/></label>
     <label>Owner full name<input required value={form.ownerName} onChange={(e)=>setForm({...form,ownerName:e.target.value})}/></label>
@@ -333,19 +331,19 @@ function CreateVendorForm({onCreated}:{onCreated:()=>void}){
     <label>Owner phone<input value={form.ownerPhone} onChange={(e)=>setForm({...form,ownerPhone:e.target.value})}/></label>
     <PasswordField label="Temporary password" value={form.initialPassword} onChange={(value)=>setForm({...form,initialPassword:value})}/>
     <label className="checkbox-label"><input type="checkbox" checked={form.manualOrderAcceptance} onChange={(e)=>setForm({...form,manualOrderAcceptance:e.target.checked})}/>Require vendor order acceptance</label>
-    <p className="muted-note">The vendor ID is generated automatically. A welcome email with the username, email and temporary password is sent to the owner on creation.</p>
+    <p className="muted-note">The vendor ID and map location are generated automatically from the address. A welcome email with the username, email and temporary password is sent to the owner on creation.</p>
     {error&&<p className="auth-error">{error}</p>}
     <button className="primary" disabled={busy}>{busy?"Creating…":"Create vendor"}</button>
   </form>;
 }
 
 function EditVendorForm({restaurant,onSaved}:{restaurant:AdminRestaurant;onSaved:()=>void}){
-  const [form,setForm]=useState({name:restaurant.name,imageUrl:restaurant.imageUrl||"",area:restaurant.area,address:restaurant.address||"",latitude:String(restaurant.latitude),longitude:String(restaurant.longitude),commissionPercent:restaurant.commissionPercent===null?"":String(restaurant.commissionPercent)});
+  const [form,setForm]=useState({name:restaurant.name,imageUrl:restaurant.imageUrl||"",area:restaurant.area,address:restaurant.address||"",commissionPercent:restaurant.commissionPercent===null?"":String(restaurant.commissionPercent)});
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const save=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
     try{
-      await adminApi(`/restaurants/${restaurant.id}`,{method:"PATCH",body:JSON.stringify({name:form.name,imageUrl:form.imageUrl||null,area:form.area,address:form.address,latitude:Number(form.latitude),longitude:Number(form.longitude),commissionPercent:form.commissionPercent===""?null:Number(form.commissionPercent)})});
+      await adminApi(`/restaurants/${restaurant.id}`,{method:"PATCH",body:JSON.stringify({name:form.name,imageUrl:form.imageUrl||null,area:form.area,address:form.address,commissionPercent:form.commissionPercent===""?null:Number(form.commissionPercent)})});
       onSaved();
     }catch(e){setError(e instanceof Error?e.message:"Could not save this vendor");}finally{setBusy(false);}
   };
@@ -354,9 +352,8 @@ function EditVendorForm({restaurant,onSaved}:{restaurant:AdminRestaurant;onSaved
     <label>Business name<input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></label>
     <label>Address<input required value={form.address} onChange={(e)=>setForm({...form,address:e.target.value})}/></label>
     <label>Area<input required value={form.area} onChange={(e)=>setForm({...form,area:e.target.value})}/></label>
-    <label>Latitude<input required type="number" step="any" value={form.latitude} onChange={(e)=>setForm({...form,latitude:e.target.value})}/></label>
-    <label>Longitude<input required type="number" step="any" value={form.longitude} onChange={(e)=>setForm({...form,longitude:e.target.value})}/></label>
     <label>Commission rate (%)<input type="number" min="0" max="100" step="0.1" placeholder="Platform default" value={form.commissionPercent} onChange={(e)=>setForm({...form,commissionPercent:e.target.value})}/></label>
+    <p className="muted-note">Changing address or area re-derives the map location automatically.</p>
     {error&&<p className="auth-error">{error}</p>}
     <button className="primary" disabled={busy}>{busy?"Saving…":"Save vendor"}</button>
   </form>;

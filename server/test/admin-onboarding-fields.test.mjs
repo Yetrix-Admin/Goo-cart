@@ -20,11 +20,25 @@ test("admin can onboard a vendor and a delivery partner with the new fields, and
   ]);
   await connectDb();
 
+  // Vendor onboarding now geocodes the address (see lib/geocode.ts) instead
+  // of asking for latitude/longitude directly. Stub out just the Nominatim
+  // calls so the test is deterministic and doesn't depend on live internet
+  // access — the test's own requests to the in-process server (below) still
+  // go through the real fetch.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    if (String(url).includes("nominatim.openstreetmap.org")) {
+      return Promise.resolve(new Response(JSON.stringify([{ lat: "17.4400", lon: "81.2600" }]), { status: 200 }));
+    }
+    return realFetch(url, init);
+  };
+
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
 
   t.after(async () => {
+    globalThis.fetch = realFetch;
     await new Promise((resolve) => server.close(resolve));
     await disconnectDb();
     await mongo.stop();
@@ -54,7 +68,7 @@ test("admin can onboard a vendor and a delivery partner with the new fields, and
     token: admin.token,
     method: "POST",
     body: {
-      name: "OG Grocery", imageUrl: TINY_PNG, area: "Jangareddigudem", address: "12 Market Street", latitude: 17.44, longitude: 81.26,
+      name: "OG Grocery", imageUrl: TINY_PNG, area: "Jangareddigudem", address: "12 Market Street",
       businessType: "Grocery Store", commissionPercent: 12.5,
       ownerName: "OG Owner", ownerUsername: "og_owner", ownerEmail: "owner@oggrocery.test", ownerPhone: "+919000000099",
       initialPassword: "OgGrocery#2026", manualOrderAcceptance: true,
@@ -63,17 +77,27 @@ test("admin can onboard a vendor and a delivery partner with the new fields, and
   assert.equal(vendorCreate.status, 200, JSON.stringify(vendorCreate.json));
   const restaurantId = vendorCreate.json.data.restaurant.id;
   assert.equal(vendorCreate.json.data.restaurant.address, "12 Market Street");
+  assert.equal(vendorCreate.json.data.restaurant.latitude, 17.44, "latitude should come from the (stubbed) geocoder, not from the request body");
+  assert.equal(vendorCreate.json.data.restaurant.longitude, 81.26);
   assert.equal(vendorCreate.json.data.owner.username, "og_owner");
   assert.ok(!("passwordHash" in vendorCreate.json.data.owner), "created owner response must never include a password hash");
 
   // Vendor ID is auto-generated (the Mongo _id), never supplied by the admin.
   assert.match(restaurantId, /^[0-9a-f]{24}$/);
 
+  // No address at all must be rejected (there's no lat/lng fallback anymore).
+  const noAddress = await request("/api/v1/admin/restaurants", {
+    token: admin.token,
+    method: "POST",
+    body: { name: "No Address Vendor", area: "A", ownerName: "No Address Owner", ownerEmail: "noaddress@test.test", initialPassword: "NoAddress#2026" },
+  });
+  assert.equal(noAddress.status, 400);
+
   // A duplicate username must be rejected.
   const dupUsername = await request("/api/v1/admin/restaurants", {
     token: admin.token,
     method: "POST",
-    body: { name: "Dup", area: "A", latitude: 1, longitude: 1, ownerName: "Duplicate Owner", ownerUsername: "og_owner", ownerEmail: "dup@test.test", initialPassword: "DupPass#2026" },
+    body: { name: "Dup", area: "A", address: "1 Dup Street", ownerName: "Duplicate Owner", ownerUsername: "og_owner", ownerEmail: "dup@test.test", initialPassword: "DupPass#2026" },
   });
   assert.equal(dupUsername.status, 409);
 
@@ -99,6 +123,7 @@ test("admin can onboard a vendor and a delivery partner with the new fields, and
   });
   assert.equal(edited.status, 200, JSON.stringify(edited.json));
   assert.equal(edited.json.data.restaurant.address, "45 New Address Road");
+  assert.equal(edited.json.data.restaurant.latitude, 17.44, "editing the address should re-geocode, not clear the coordinates");
 
   const badCommission = await request(`/api/v1/admin/restaurants/${restaurantId}`, { token: admin.token, method: "PATCH", body: { commissionPercent: 150 } });
   assert.equal(badCommission.status, 400);

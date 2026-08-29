@@ -16,11 +16,23 @@ test("admin audit logs redact sensitive account, bank, token and key fields", as
   ]);
   await connectDb();
 
+  // Vendor creation geocodes the address (see lib/geocode.ts) instead of
+  // taking latitude/longitude directly. Stub just the Nominatim calls so
+  // this test doesn't depend on live internet access.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    if (String(url).includes("nominatim.openstreetmap.org")) {
+      return Promise.resolve(new Response(JSON.stringify([{ lat: "17.4368", lon: "81.2668" }]), { status: 200 }));
+    }
+    return realFetch(url, init);
+  };
+
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
 
   t.after(async () => {
+    globalThis.fetch = realFetch;
     await new Promise((resolve) => server.close(resolve));
     await disconnectDb();
     await mongo.stop();
@@ -57,8 +69,7 @@ test("admin audit logs redact sensitive account, bank, token and key fields", as
       ownerEmail: "owner@audit.test",
       initialPassword: "OwnerSecret123!",
       area: "Audit Area",
-      latitude: 17.4368,
-      longitude: 81.2668,
+      address: "1 Audit Street",
       bankDetails: {
         accountNumber: "1234567890",
         ifsc: "TEST0001234",
@@ -77,7 +88,7 @@ test("admin audit logs redact sensitive account, bank, token and key fields", as
       bankDetails: {
         accountNumber: "9999999999",
         ifsc: "TEST0009999",
-        card: { last4: "4242", cvv: "123" },
+        card: { last4: "4242", cvv: "cvv-marker-931" },
       },
     },
   });
@@ -87,7 +98,7 @@ test("admin audit logs redact sensitive account, bank, token and key fields", as
   assert.ok(logs.length >= 2);
   const serialized = JSON.stringify(logs);
 
-  for (const sensitive of ["OwnerSecret123!", "1234567890", "9999999999", "TEST0001234", "TEST0009999", "should-not-appear", "4242", "123"]) {
+  for (const sensitive of ["OwnerSecret123!", "1234567890", "9999999999", "TEST0001234", "TEST0009999", "should-not-appear", "4242", "cvv-marker-931"]) {
     assert.equal(serialized.includes(sensitive), false, `${sensitive} leaked into audit logs`);
   }
   assert.equal(serialized.includes("[REDACTED]"), true);
