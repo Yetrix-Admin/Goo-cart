@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 
 type Service = "Food" | "Grocery" | "Vegetables" | "Mart" | "Bike Taxi" | "Parcel";
-type Product = { id:string; service:Service; vendor:string; name:string; description:string; price:number; stock:number; rating:number; eta:string };
+type Product = { id:string; service:Service; vendor:string; name:string; description:string; image_url:string|null; price:number; stock:number; rating:number; eta:string };
 type Order = { id:string; reference:string; service:Service; vendor:string; vendor_id:string; customer:string; customer_id:string; partner:string|null; partner_id:string|null; status:string; total:number; details:Record<string,unknown>; created_at:string; updated_at:string };
 type Offer = { id:string;vendor_id:string;vendor:string;title:string;code:string;discount_percent:number;min_order:number;active:number;created_at:string;updated_at:string };
 type PlatformUser = { id:string;email:string;name:string;role:string;status:string;created_at?:string };
@@ -132,17 +132,17 @@ function AdminCatalog({state,act,busy,retry}:{state:Snapshot;act:(x:Record<strin
     {error&&<p className="auth-error">{error}</p>}
     <PrimaryActionButton label={showCreate?"Cancel":"+ Create Product"} onClick={()=>setShowCreate(!showCreate)}/>
     {showCreate&&<CreateProductForm onCreated={()=>{setShowCreate(false);void retry();}}/>}
-    <div className="inventory-list">{state.products.map((p)=><article key={p.id}><i>{p.name[0]}</i><span><small>{p.service} • {p.vendor}</small><h3>{p.name}</h3><p>{money(p.price)} • ★ {p.rating}</p></span><b className={p.stock<15?"low-stock":""}>{p.stock} stock</b><div className="qty"><button disabled={busy} onClick={()=>void act({action:"stock.adjust",id:p.id,amount:-1})}>−</button><button disabled={busy} onClick={()=>void act({action:"stock.adjust",id:p.id,amount:5})}>+5</button></div><button className="secondary danger-text" onClick={()=>void remove(p.id)}>Delete</button></article>)}</div>
+    <div className="inventory-list">{state.products.map((p)=><article key={p.id}>{p.image_url?<img src={p.image_url} alt="" className="vendor-thumb"/>:<i>{p.name[0]}</i>}<span><small>{p.service} • {p.vendor}</small><h3>{p.name}</h3><p>{money(p.price)} • ★ {p.rating}</p></span><b className={p.stock<15?"low-stock":""}>{p.stock} stock</b><div className="qty"><button disabled={busy} onClick={()=>void act({action:"stock.adjust",id:p.id,amount:-1})}>−</button><button disabled={busy} onClick={()=>void act({action:"stock.adjust",id:p.id,amount:5})}>+5</button></div><button className="secondary danger-text" onClick={()=>void remove(p.id)}>Delete</button></article>)}</div>
   </WorkspacePage>;
 }
 
 function CreateProductForm({onCreated}:{onCreated:()=>void}){
-  const [form,setForm]=useState({service:"Grocery",name:"",description:"",price:"",stock:"0"});
+  const [form,setForm]=useState({service:"Grocery",name:"",description:"",imageUrl:"",price:"",stock:"0"});
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");
     try{
-      await adminApi("/products",{method:"POST",body:JSON.stringify({service:form.service,name:form.name,description:form.description,price:Number(form.price),stock:Number(form.stock)})});
+      await adminApi("/products",{method:"POST",body:JSON.stringify({service:form.service,name:form.name,description:form.description,imageUrl:form.imageUrl,price:Number(form.price),stock:Number(form.stock)})});
       onCreated();
     }catch(e){setError(e instanceof Error?e.message:"Could not create this product");}finally{setBusy(false);}
   };
@@ -154,6 +154,7 @@ function CreateProductForm({onCreated}:{onCreated:()=>void}){
         <option value="Mart">Mart</option>
       </select>
     </label>
+    <ImageUploadField label="Product photo" value={form.imageUrl} onChange={(imageUrl)=>setForm({...form,imageUrl})}/>
     <label>Product name<input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></label>
     <label>Description (optional)<input value={form.description} onChange={(e)=>setForm({...form,description:e.target.value})}/></label>
     <label>Price (₹)<input required type="number" min="1" value={form.price} onChange={(e)=>setForm({...form,price:e.target.value})}/></label>
@@ -747,6 +748,7 @@ function AdminOrderDetail({orderId}:{orderId:string}){
 type AdminPricingSettings = { deliveryFee:number; platformFee:number; taxRatePercent:number; restaurantDiscountThreshold:number; restaurantDiscountAmount:number; vendorCommissionPercent:number; deliveryPartnerPayout:number };
 type AdminCoupon = { id:string; code:string; title:string; description:string; type:"PERCENT"|"FLAT"|"FREE_DELIVERY"; value:number; minOrder:number; maxDiscount:number|null; active:boolean; targetRestaurantIds:string[]; targetFoodItemIds:string[]; showOnHome:boolean };
 type AdminServicePricing = { service:"Bike Taxi"|"Parcel"; baseFare:number; perKm:number; platformFee:number; partnerPayoutPercent:number };
+type AdminBanner = { id:string; imageUrl:string; title:string; subtitle:string; linkType:"NONE"|"RESTAURANT"|"SERVICE"; linkTargetId:string|null; active:boolean; sortOrder:number };
 type AdminSupportTicket = { id:string; ticketNumber:string; customerId:string; customerName:string; customerContact:string; orderId:string|null; orderNumber:string|null; orderStatus:string|null; category:string; subject:string; message:string; status:"OPEN"|"IN_PROGRESS"|"RESOLVED"|"CLOSED"; createdAt:string; updatedAt:string };
 
 type FinanceData = {
@@ -809,7 +811,103 @@ function AdminDiscounts(){
     <ServicePricingPanel/>
     <div style={{height:28}}/>
     <CouponsPanel/>
+    <div style={{height:28}}/>
+    <BannersPanel/>
   </WorkspacePage>;
+}
+
+function BannersPanel(){
+  const [banners,setBanners]=useState<AdminBanner[]|null>(null);
+  const [showCreate,setShowCreate]=useState(false);
+  const [editingId,setEditingId]=useState<string|null>(null);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const load=useCallback(async()=>{try{const r=await adminApi<{banners:AdminBanner[]}>("/banners");setBanners(r.banners);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not load banners");}},[]);
+  useEffect(()=>{const initial=setTimeout(()=>void load(),0);return()=>clearTimeout(initial);},[load]);
+
+  const toggleActive=async(b:AdminBanner)=>{setBusy(true);try{await adminApi(`/banners/${b.id}`,{method:"PATCH",body:JSON.stringify({active:!b.active})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not update banner");}finally{setBusy(false);}};
+  const remove=async(b:AdminBanner)=>{if(!confirm(`Delete banner "${b.title||"Untitled"}"?`))return;setBusy(true);try{await adminApi(`/banners/${b.id}`,{method:"DELETE"});await load();}catch(e){setError(e instanceof Error?e.message:"Could not delete banner");}finally{setBusy(false);}};
+  const move=async(b:AdminBanner,delta:number)=>{setBusy(true);try{await adminApi(`/banners/${b.id}`,{method:"PATCH",body:JSON.stringify({sortOrder:b.sortOrder+delta})});await load();}catch(e){setError(e instanceof Error?e.message:"Could not reorder banners");}finally{setBusy(false);}};
+
+  return <div>
+    <h4 style={{margin:"0 0 4px",fontSize:11}}>Home screen banners</h4>
+    <p className="muted-note">Shown as a carousel on the customer app home screen, right below the search bar. Lowest order number shows first.</p>
+    {error&&<p className="auth-error">{error}</p>}
+    <PrimaryActionButton label={showCreate?"Cancel":"+ Add Banner"} onClick={()=>{setShowCreate(!showCreate);setEditingId(null);}}/>
+    {showCreate&&<BannerForm onDone={()=>{setShowCreate(false);void load();}}/>}
+    {banners===null?<Empty title="Loading…" copy="Fetching banners."/>:!banners.length?<Empty title="No banners yet" copy="Add one above to show a promo carousel on the customer app home screen."/>:
+    <div className="directory">{banners.map((b,i)=>editingId===b.id?
+      <BannerForm key={b.id} banner={b} onDone={()=>{setEditingId(null);void load();}}/>
+      :<article key={b.id}>
+      {b.imageUrl?<img src={b.imageUrl} alt="" className="vendor-thumb"/>:<i>{(b.title||"B")[0]}</i>}
+      <span><b>{b.title||"Untitled banner"}</b><small>{b.subtitle||"No subtitle"} • {b.linkType==="NONE"?"No link":b.linkType==="RESTAURANT"?"Links to a restaurant":"Links to a service"} • Order {b.sortOrder}</small></span>
+      <span className={`status status-${b.active?"active":"suspended"}`}>● {b.active?"Active":"Inactive"}</span>
+      <button className="secondary" disabled={busy||i===0} onClick={()=>void move(b,-1)} aria-label="Move up">↑</button>
+      <button className="secondary" disabled={busy||i===banners.length-1} onClick={()=>void move(b,1)} aria-label="Move down">↓</button>
+      <button className="secondary" disabled={busy} onClick={()=>{setEditingId(b.id);setShowCreate(false);}}>Edit</button>
+      <button className="secondary" disabled={busy} onClick={()=>void toggleActive(b)}>{b.active?"Deactivate":"Activate"}</button>
+      <button className="secondary danger-text" disabled={busy} onClick={()=>void remove(b)}>Delete</button>
+    </article>)}</div>}
+  </div>;
+}
+
+function BannerForm({banner,onDone}:{banner?:AdminBanner;onDone:()=>void}){
+  const [form,setForm]=useState({
+    imageUrl:banner?.imageUrl??"",
+    title:banner?.title??"",
+    subtitle:banner?.subtitle??"",
+    linkType:banner?.linkType??("NONE" as AdminBanner["linkType"]),
+    linkTargetId:banner?.linkTargetId??"",
+    sortOrder:String(banner?.sortOrder??0),
+  });
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const submit=async(e:React.FormEvent)=>{e.preventDefault();
+    if(!form.imageUrl){setError("Upload a banner image.");return;}
+    setBusy(true);setError("");
+    const body={
+      imageUrl:form.imageUrl,
+      title:form.title,
+      subtitle:form.subtitle,
+      linkType:form.linkType,
+      linkTargetId:form.linkType==="NONE"?null:form.linkTargetId.trim()||null,
+      sortOrder:Number(form.sortOrder)||0,
+    };
+    try{
+      if(banner)await adminApi(`/banners/${banner.id}`,{method:"PATCH",body:JSON.stringify(body)});
+      else await adminApi("/banners",{method:"POST",body:JSON.stringify(body)});
+      onDone();
+    }catch(e){setError(e instanceof Error?e.message:`Could not ${banner?"update":"create"} this banner`);}finally{setBusy(false);}
+  };
+  return <form className="auth-form inline-form" onSubmit={(e)=>void submit(e)}>
+    <ImageUploadField label="Banner image" value={form.imageUrl} onChange={(imageUrl)=>setForm({...form,imageUrl})}/>
+    <label>Title (optional)<input value={form.title} onChange={(e)=>setForm({...form,title:e.target.value})} placeholder="e.g. Weekend Grocery Sale"/></label>
+    <label>Subtitle (optional)<input value={form.subtitle} onChange={(e)=>setForm({...form,subtitle:e.target.value})} placeholder="e.g. Up to 30% off, this weekend only"/></label>
+    <label>Display order<input type="number" value={form.sortOrder} onChange={(e)=>setForm({...form,sortOrder:e.target.value})} placeholder="0"/></label>
+    <label>Tapping this banner opens
+      <select value={form.linkType} onChange={(e)=>setForm({...form,linkType:e.target.value as AdminBanner["linkType"],linkTargetId:""})}>
+        <option value="NONE">Nothing (display only)</option>
+        <option value="RESTAURANT">A restaurant</option>
+        <option value="SERVICE">A service (Grocery, Vegetables, Mart, Bike Taxi, Parcel)</option>
+      </select>
+    </label>
+    {form.linkType==="RESTAURANT"&&<label>Restaurant ID<input value={form.linkTargetId} onChange={(e)=>setForm({...form,linkTargetId:e.target.value})} placeholder="Paste the restaurant's ID from the Vendors page"/></label>}
+    {form.linkType==="SERVICE"&&<label>Service
+      <select value={form.linkTargetId} onChange={(e)=>setForm({...form,linkTargetId:e.target.value})}>
+        <option value="">Choose a service</option>
+        <option value="GROCERY">Grocery</option>
+        <option value="VEGETABLES">Vegetables</option>
+        <option value="MART">Mart</option>
+        <option value="BIKE_TAXI">Bike Taxi</option>
+        <option value="PARCEL">Parcel</option>
+      </select>
+    </label>}
+    {error&&<p className="auth-error">{error}</p>}
+    <div style={{display:"flex",gap:8}}>
+      <button className="primary" disabled={busy}>{busy?"Saving…":banner?"Save changes":"Add banner"}</button>
+      {banner&&<button type="button" className="secondary" disabled={busy} onClick={onDone}>Cancel</button>}
+    </div>
+  </form>;
 }
 
 function PricingSettingsPanel(){

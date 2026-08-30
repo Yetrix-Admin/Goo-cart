@@ -421,10 +421,26 @@ const productSchema = new Schema(
     vendorName: { type: String, required: true },
     name: { type: String, required: true },
     description: { type: String, default: "" },
+    imageUrl: { type: String, default: null },
     price: { type: Number, required: true, min: 0 },
     stock: { type: Number, required: true, default: 0, min: 0 },
     rating: { type: Number, default: 0 },
     eta: { type: String, default: "30–45 min" },
+  },
+  opts,
+);
+
+// A home-screen promo carousel admin can manage directly — distinct from
+// Coupon, which is a functional discount code rather than a display banner.
+const bannerSchema = new Schema(
+  {
+    imageUrl: { type: String, required: true },
+    title: { type: String, default: "" },
+    subtitle: { type: String, default: "" },
+    linkType: { type: String, enum: ["NONE", "RESTAURANT", "SERVICE"], default: "NONE" },
+    linkTargetId: { type: String, default: null },
+    active: { type: Boolean, default: true },
+    sortOrder: { type: Number, default: 0, index: true },
   },
   opts,
 );
@@ -541,6 +557,7 @@ const supportTicketSchema = new Schema(
 );
 
 export const Product = model("Product", productSchema);
+export const Banner = model("Banner", bannerSchema);
 export const Reservation = model("Reservation", reservationSchema);
 export const ServiceOrder = model("ServiceOrder", serviceOrderSchema);
 export const VendorOffer = model("VendorOffer", vendorOfferSchema);

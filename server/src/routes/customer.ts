@@ -2,7 +2,8 @@ import { Router } from "express";
 import { AuditLog, Order, OrderRating, PricingRule, Product, Restaurant, ServiceConfig, ServiceOrder, SupportTicket, User, nextSequence } from "../models.js";
 import { requireAuth, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
-import { isValidCoordinate } from "../lib/geo.js";
+import { haversineKm, isValidCoordinate } from "../lib/geo.js";
+import { geocodeAddress } from "../lib/geocode.js";
 import { getPricingSettings } from "../lib/pricingSettings.js";
 import { reserveLines, consumeReservations, releaseReservations } from "../lib/inventory.js";
 
@@ -259,6 +260,63 @@ customerRouter.get("/services", async (_req, res) => {
   }
 });
 
+// Distance is always computed here, server-side, never trusted as a raw
+// number from the client — so the fare a rider previews is the fare they're
+// charged, and a client can't shortchange the partner payout by sending a
+// smaller distance than the real trip. When the customer picked pickup/drop
+// on the map (the normal path — see location-picker.tsx), the client already
+// has exact coordinates and passes them directly, so this skips re-geocoding
+// free text through Nominatim entirely — which is also what makes this
+// reliable for addresses Nominatim's text search can't resolve on its own.
+type GeocodedTrip = { distanceKm: number; pickup: { latitude: number; longitude: number }; drop: { latitude: number; longitude: number } };
+
+async function geocodeTrip(
+  pickup: string,
+  drop: string,
+  pickupCoords?: { latitude: number; longitude: number } | null,
+  dropCoords?: { latitude: number; longitude: number } | null,
+): Promise<GeocodedTrip | null> {
+  const [pickupPoint, dropPoint] = await Promise.all([
+    pickupCoords ?? geocodeAddress(pickup),
+    dropCoords ?? geocodeAddress(drop),
+  ]);
+  if (!pickupPoint || !dropPoint) return null;
+  const straightLineKm = haversineKm(pickupPoint, dropPoint);
+  // Nominatim only gives straight-line distance; a 35% padding approximates
+  // real road distance without a paid routing provider.
+  const roadKm = Math.round(straightLineKm * 1.35 * 10) / 10;
+  const distanceKm = Math.min(50, Math.max(1, roadKm));
+  return { distanceKm, pickup: pickupPoint, drop: dropPoint };
+}
+
+function coordsFromQuery(req: import("express").Request, prefix: "pickup" | "drop"): { latitude: number; longitude: number } | null {
+  const latitude = Number(req.query[`${prefix}Lat`]);
+  const longitude = Number(req.query[`${prefix}Lng`]);
+  return isValidCoordinate(latitude, longitude) ? { latitude, longitude } : null;
+}
+
+customerRouter.get("/services/fare-preview", async (req, res) => {
+  try {
+    const service = SERVICE_NAMES[String(req.query.service ?? "").toUpperCase()];
+    if (!["Bike Taxi", "Parcel"].includes(service)) return res.status(400).json(fail("INVALID_SERVICE", "Choose Bike Taxi or Parcel."));
+    const pickup = String(req.query.pickup ?? "").trim();
+    const drop = String(req.query.drop ?? "").trim();
+    if (pickup.length < 3 || drop.length < 3) return res.status(400).json(fail("INVALID_LOCATION", "Enter a pickup and drop address."));
+
+    const trip = await geocodeTrip(pickup, drop, coordsFromQuery(req, "pickup"), coordsFromQuery(req, "drop"));
+    if (!trip) return res.status(400).json(fail("GEOCODE_FAILED", "Couldn't locate one of these addresses. Try being more specific."));
+    const { distanceKm } = trip;
+
+    const rule: any = await PricingRule.findById(service).lean();
+    if (!rule) return res.status(409).json(fail("PRICING_UNAVAILABLE", `${service} pricing has not been configured by admin.`));
+    const fare = Math.round(rule.baseFare + rule.perKm * distanceKm);
+    const total = Math.round(fare + rule.platformFee);
+    res.json(ok({ distanceKm, baseFare: rule.baseFare, perKm: rule.perKm, platformFee: rule.platformFee, fare, total }));
+  } catch (e) {
+    res.status(500).json(fail("FARE_PREVIEW_FAILED", e instanceof Error ? e.message : "Could not calculate a fare"));
+  }
+});
+
 customerRouter.get("/services/:key/products", async (req, res) => {
   try {
     const service = SERVICE_NAMES[String(req.params.key).toUpperCase()];
@@ -266,7 +324,7 @@ customerRouter.get("/services/:key/products", async (req, res) => {
     const config: any = await ServiceConfig.findById(service).lean();
     if (config?.enabled === false) return res.status(409).json(fail("SERVICE_UNAVAILABLE", `${service} is temporarily unavailable.`));
     const products = await Product.find({ service, stock: { $gt: 0 } }).sort({ vendorName: 1, name: 1 }).lean();
-    res.json(ok({ products: (products as any[]).map((p) => ({ id: String(p._id), service: p.service, vendorId: String(p.vendorId), vendorName: p.vendorName, name: p.name, description: p.description, price: p.price, stock: p.stock, rating: p.rating, eta: p.eta })) }));
+    res.json(ok({ products: (products as any[]).map((p) => ({ id: String(p._id), service: p.service, vendorId: String(p.vendorId), vendorName: p.vendorName, name: p.name, description: p.description, imageUrl: p.imageUrl ?? null, price: p.price, stock: p.stock, rating: p.rating, eta: p.eta })) }));
   } catch (e) {
     res.status(500).json(fail("PRODUCTS_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load products"));
   }
@@ -292,9 +350,12 @@ customerRouter.post("/service-orders", requireAuth, async (req: AuthedRequest, r
     if (["Bike Taxi", "Parcel"].includes(service)) {
       const pickup = String(body.pickup ?? "").trim();
       const drop = String(body.drop ?? "").trim();
-      const distanceKm = Number(body.distanceKm);
       if (pickup.length < 3 || drop.length < 3) return res.status(400).json(fail("INVALID_LOCATION", "Pickup and drop are required."));
-      if (!Number.isFinite(distanceKm) || distanceKm < 1 || distanceKm > 50) return res.status(400).json(fail("INVALID_DISTANCE", "Distance must be between 1 and 50 km."));
+      const pickupCoords = isValidCoordinate(body.pickupLatitude, body.pickupLongitude) ? { latitude: Number(body.pickupLatitude), longitude: Number(body.pickupLongitude) } : null;
+      const dropCoords = isValidCoordinate(body.dropLatitude, body.dropLongitude) ? { latitude: Number(body.dropLatitude), longitude: Number(body.dropLongitude) } : null;
+      const trip = await geocodeTrip(pickup, drop, pickupCoords, dropCoords);
+      if (!trip) return res.status(400).json(fail("GEOCODE_FAILED", "Couldn't locate one of these addresses. Try being more specific."));
+      const { distanceKm } = trip;
       const rule: any = await PricingRule.findById(service).lean();
       if (!rule) return res.status(409).json(fail("PRICING_UNAVAILABLE", `${service} pricing has not been configured by admin.`));
       const fare = Math.round(rule.baseFare + rule.perKm * distanceKm);
@@ -305,7 +366,13 @@ customerRouter.post("/service-orders", requireAuth, async (req: AuthedRequest, r
       const order = await ServiceOrder.create({
         reference, service, vendorName: service === "Bike Taxi" ? "Goocart Bike" : "Goocart Parcel", customerId: req.user!._id, customerName: req.user!.name,
         status: "READY_FOR_PICKUP", total,
-        details: { pickup, drop, distanceKm, fare, platformFee: rule.platformFee, partnerPayout, platformNetRevenue: total - partnerPayout, packageType: service === "Parcel" ? String(body.packageType ?? "Small Package") : undefined, verificationCode: String(Math.floor(1000 + Math.random() * 9000)) },
+        details: {
+          pickup, drop, distanceKm, fare, platformFee: rule.platformFee, partnerPayout, platformNetRevenue: total - partnerPayout,
+          pickupLatitude: trip.pickup.latitude, pickupLongitude: trip.pickup.longitude,
+          dropLatitude: trip.drop.latitude, dropLongitude: trip.drop.longitude,
+          packageType: service === "Parcel" ? String(body.packageType ?? "Small Package") : undefined,
+          verificationCode: String(Math.floor(1000 + Math.random() * 9000)),
+        },
       });
       await AuditLog.create({ actorId: req.user!._id, actorRole: req.user!.role, action: "service_order.create", entityType: service, entityId: String(order._id), after: { reference, total } });
       return res.json(ok({ order: serviceOrderDTO(order.toObject()) }, `${service} booked`));

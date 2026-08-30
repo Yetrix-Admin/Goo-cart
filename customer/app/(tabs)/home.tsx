@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
+import { Brand } from "@/components/Brand";
 import { SearchBar } from "@/components/SearchBar";
 import { ServiceCard } from "@/components/ServiceCard";
 import { SectionHeader } from "@/components/SectionHeader";
@@ -16,12 +17,13 @@ import { VegBadge } from "@/components/VegBadge";
 import { useLocationStore } from "@/store/useLocationStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useCatalogStore } from "@/store/useCatalogStore";
-import { Coupon, Restaurant, ServiceType } from "@/types";
+import { Banner, Coupon, Restaurant, ServiceType } from "@/types";
 
 export default function HomeScreen() {
   const location = useLocationStore((s) => s.selected);
   const user = useAuthStore((s) => s.user);
   const coupons = useCatalogStore((s) => s.coupons);
+  const banners = useCatalogStore((s) => s.banners);
   const [popular, setPopular] = useState<Restaurant[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -75,21 +77,29 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
-        <View style={styles.headerSide} />
-        <Pressable style={styles.location} onPress={() => router.push("/location")} accessibilityRole="button">
-          <View style={styles.pin}>
-            <Icon name="location" size={17} color={colors.primary} />
-          </View>
-          <View style={styles.locationText}>
-            <Text style={styles.locationLabel}>DELIVERING TO</Text>
-            <Text style={styles.locationName} numberOfLines={1}>
-              {location?.address ?? location?.city ?? "Set your location"}
-            </Text>
-          </View>
-        </Pressable>
-        <Pressable style={[styles.profileButton, styles.headerSide]} onPress={() => router.push("/(tabs)/account")} accessibilityLabel="Account">
-          <Text style={styles.profileText}>{(user?.name ?? "G").slice(0, 2).toUpperCase()}</Text>
-        </Pressable>
+        <View style={styles.headerLeft}>
+          <Pressable style={styles.location} onPress={() => router.push("/location")} accessibilityRole="button">
+            <View style={styles.pin}>
+              <Icon name="location" size={14} color={colors.primary} />
+            </View>
+            <View style={styles.locationText}>
+              <Text style={styles.locationLabel}>DELIVERING TO</Text>
+              <Text style={styles.locationName} numberOfLines={1}>
+                {location?.address ?? location?.city ?? "Set your location"}
+              </Text>
+            </View>
+          </Pressable>
+        </View>
+
+        <View style={styles.headerCenter}>
+          <Brand size={20} />
+        </View>
+
+        <View style={styles.headerRight}>
+          <Pressable style={styles.profileButton} onPress={() => router.push("/(tabs)/account")} accessibilityLabel="Account">
+            <Text style={styles.profileText}>{(user?.name ?? "G").slice(0, 2).toUpperCase()}</Text>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView
@@ -104,6 +114,14 @@ export default function HomeScreen() {
         </View>
 
         <SearchBar placeholder="Search dishes, groceries, stores…" editable={false} onPress={() => router.push("/(tabs)/search")} />
+
+        {banners.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bannerScroll}>
+            {banners.map((banner) => (
+              <BannerCard key={banner.id} banner={banner} />
+            ))}
+          </ScrollView>
+        )}
 
         {discountedItems.length > 0 && (
           <View style={styles.discountSection}>
@@ -182,6 +200,34 @@ export default function HomeScreen() {
   );
 }
 
+function BannerCard({ banner }: { banner: Banner }) {
+  const open = () => {
+    if (banner.linkType === "RESTAURANT" && banner.linkTargetId) {
+      router.push({ pathname: "/food/restaurant/[id]", params: { id: banner.linkTargetId } });
+    } else if (banner.linkType === "SERVICE" && banner.linkTargetId) {
+      router.push({ pathname: "/service/[type]", params: { type: banner.linkTargetId } });
+    }
+  };
+
+  return (
+    <Pressable
+      style={styles.bannerCard}
+      onPress={open}
+      disabled={banner.linkType === "NONE"}
+      accessibilityRole={banner.linkType === "NONE" ? undefined : "button"}
+      accessibilityLabel={banner.title || "Promotional banner"}
+    >
+      <RemoteImage uri={banner.imageUrl} fallbackLabel={banner.title || "Goocart"} style={styles.bannerImage} />
+      {(banner.title || banner.subtitle) && (
+        <View style={styles.bannerCaption}>
+          {banner.title ? <Text style={styles.bannerTitle} numberOfLines={1}>{banner.title}</Text> : null}
+          {banner.subtitle ? <Text style={styles.bannerSubtitle} numberOfLines={1}>{banner.subtitle}</Text> : null}
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
 function offerLabel(coupon: Coupon) {
   if (coupon.type === "FREE_DELIVERY") return "FREE DELIVERY";
   if (coupon.type === "PERCENT") return `${coupon.value}% OFF`;
@@ -251,25 +297,26 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.md,
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.surface,
   },
-  // A same-width invisible spacer on the left balances the profile button on
-  // the right, so the location block below is centered on the header rather
-  // than left-aligned in the space next to the avatar.
-  headerSide: { width: 38 },
-  location: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, flex: 1 },
-  pin: { width: 34, height: 34, borderRadius: radius.sm, backgroundColor: colors.primaryMuted, alignItems: "center", justifyContent: "center" },
+  // Equal-flex left/right columns around a natural-width center column is
+  // what actually centers the logo — a same-width column on both sides,
+  // not a percentage guess, so the address text can never run into it.
+  headerLeft: { flex: 1, alignItems: "flex-start", minWidth: 0 },
+  headerCenter: { alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xs },
+  headerRight: { flex: 1, alignItems: "flex-end" },
+  location: { flexDirection: "row", alignItems: "center", gap: spacing.xs, maxWidth: "100%" },
+  pin: { width: 28, height: 28, borderRadius: radius.sm, backgroundColor: colors.primaryMuted, alignItems: "center", justifyContent: "center" },
   pinIcon: { color: colors.primary, fontSize: 14 },
-  locationText: { alignItems: "center", flexShrink: 1 },
+  locationText: { flexShrink: 1, minWidth: 0 },
   locationLabel: { ...typography.caption, fontSize: 9, letterSpacing: 1.1 },
-  locationName: { ...typography.bodyStrong, fontSize: 13, textAlign: "center" },
+  locationName: { ...typography.bodyStrong, fontSize: 12 },
   chevron: { color: colors.muted },
-  profileButton: { width: 38, height: 38, borderRadius: radius.sm, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center" },
+  profileButton: { width: 36, height: 36, borderRadius: radius.sm, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center" },
   profileText: { color: colors.white, fontSize: 11, fontWeight: "800" },
   scroll: { padding: spacing.xl, gap: spacing.xxl },
   hero: { gap: spacing.xs },
@@ -279,6 +326,12 @@ const styles = StyleSheet.create({
   stepNumber: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center" },
   stepNumberText: { color: colors.white, fontSize: 12, fontWeight: "800" },
   serviceGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  bannerScroll: { gap: spacing.md, paddingRight: spacing.xl },
+  bannerCard: { width: 300, height: 140, borderRadius: radius.lg, overflow: "hidden", backgroundColor: colors.surface },
+  bannerImage: { width: "100%", height: "100%" },
+  bannerCaption: { position: "absolute", left: 0, right: 0, bottom: 0, padding: spacing.md, backgroundColor: "rgba(0,0,0,0.45)" },
+  bannerTitle: { color: colors.white, fontSize: 15, fontWeight: "800" },
+  bannerSubtitle: { color: "#EEEEEE", fontSize: 11, marginTop: 2 },
   offersSection: { marginTop: -spacing.sm },
   offerScroll: { gap: spacing.md, paddingRight: spacing.xl },
   discountSection: { marginTop: -spacing.sm },

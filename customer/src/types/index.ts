@@ -149,6 +149,17 @@ export type Coupon = {
   showOnHome: boolean;
 };
 
+// --- Home banners -----------------------------------------------------
+
+export type Banner = {
+  id: string;
+  imageUrl: string;
+  title: string;
+  subtitle: string;
+  linkType: "NONE" | "RESTAURANT" | "SERVICE";
+  linkTargetId: string | null;
+};
+
 // --- Pricing ----------------------------------------------------------
 
 export type BillBreakdown = {

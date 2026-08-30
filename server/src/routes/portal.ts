@@ -152,6 +152,7 @@ async function buildSnapshot(user: any) {
       vendor_id: String(p.vendorId),
       name: p.name,
       description: p.description,
+      image_url: p.imageUrl ?? null,
       price: p.price,
       stock: p.stock,
       rating: p.rating,

@@ -279,7 +279,9 @@ function ServiceJobCard({ job, busy, onAccept }: { job: ServiceJob; busy: boolea
       <Text style={styles.copy}>{subtitle}</Text>
       <View style={styles.cardRow}>
         <Icon name="time" size={14} color={colors.muted} />
-        <Text style={styles.copy}>Ready for pickup · ₹{job.total}</Text>
+        <Text style={styles.copy}>
+          {job.pickupDistanceKm !== null ? `${job.pickupDistanceKm} km away · ` : ""}Ready for pickup · ₹{job.total}
+        </Text>
       </View>
       <PrimaryButton label={busy ? "Accepting…" : "Accept job"} onPress={onAccept} disabled={busy} />
     </View>

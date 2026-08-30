@@ -125,6 +125,9 @@ export type ServiceJob = {
   details: Record<string, unknown>;
   partnerId: string | null;
   partnerName: string | null;
+  // Distance from this partner's last known location to the pickup point —
+  // only available once both have a real fix (see server's /service-jobs).
+  pickupDistanceKm: number | null;
   createdAt: string;
   updatedAt: string;
 };

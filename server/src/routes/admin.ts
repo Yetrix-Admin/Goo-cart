@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { AuditLog, Coupon, FoodItem, Order, PricingRule, Product, Restaurant, ServiceOrder, Session, SupportTicket, User } from "../models.js";
+import { AuditLog, Banner, Coupon, FoodItem, Order, PricingRule, Product, Restaurant, ServiceOrder, Session, SupportTicket, User } from "../models.js";
 import { requireRole, canAdmin, hashPassword, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
 import { toFoodItemDTO, toRestaurantDTO } from "./catalog.js";
@@ -1334,6 +1334,7 @@ const productDTO = (p: any) => ({
   vendorName: p.vendorName,
   name: p.name,
   description: p.description,
+  imageUrl: p.imageUrl ?? null,
   price: p.price,
   stock: p.stock,
   rating: p.rating,
@@ -1370,6 +1371,7 @@ adminRouter.post("/products", async (req: AuthedRequest, res) => {
       vendorName: body.vendorName || "Goocart",
       name,
       description: body.description ?? "",
+      imageUrl: body.imageUrl || null,
       price,
       stock: Number(body.stock) || 0,
       eta: body.eta || "30–45 min",
@@ -1391,6 +1393,7 @@ adminRouter.patch("/products/:id", async (req: AuthedRequest, res) => {
     const body = req.body ?? {};
     if (body.name !== undefined) product.name = String(body.name).trim();
     if (body.description !== undefined) product.description = String(body.description);
+    if (body.imageUrl !== undefined) product.imageUrl = body.imageUrl || null;
     if (body.price !== undefined) {
       const price = Number(body.price);
       if (!Number.isFinite(price) || price <= 0) return res.status(400).json(fail("INVALID_PRICE", "Enter a valid price."));
@@ -1419,5 +1422,92 @@ adminRouter.delete("/products/:id", async (req: AuthedRequest, res) => {
     res.json(ok({ deleted: true }, "Product deleted"));
   } catch (e) {
     res.status(500).json(fail("PRODUCT_DELETE_FAILED", e instanceof Error ? e.message : "Could not delete product"));
+  }
+});
+
+// --- Home banners -----------------------------------------------------------
+// Admin-managed promo carousel shown on the customer home screen, right below
+// the search bar. Distinct from Coupon: banners are image-first display
+// content, not functional discount codes.
+
+const bannerDTO = (b: any) => ({
+  id: String(b._id),
+  imageUrl: b.imageUrl,
+  title: b.title,
+  subtitle: b.subtitle,
+  linkType: b.linkType,
+  linkTargetId: b.linkTargetId,
+  active: b.active,
+  sortOrder: b.sortOrder,
+});
+
+adminRouter.get("/banners", async (_req, res) => {
+  try {
+    const banners = await Banner.find({}).sort({ sortOrder: 1, createdAt: 1 }).lean();
+    res.json(ok({ banners: banners.map(bannerDTO) }));
+  } catch (e) {
+    res.status(500).json(fail("BANNERS_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load banners"));
+  }
+});
+
+adminRouter.post("/banners", async (req: AuthedRequest, res) => {
+  try {
+    const body = req.body ?? {};
+    const imageUrl = String(body.imageUrl ?? "").trim();
+    if (!imageUrl) return res.status(400).json(fail("INVALID_IMAGE", "Upload a banner image."));
+    const linkType = ["NONE", "RESTAURANT", "SERVICE"].includes(body.linkType) ? body.linkType : "NONE";
+
+    const banner = await Banner.create({
+      imageUrl,
+      title: body.title || "",
+      subtitle: body.subtitle || "",
+      linkType,
+      linkTargetId: linkType === "NONE" ? null : String(body.linkTargetId ?? "").trim() || null,
+      active: body.active !== false,
+      sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 0,
+    });
+
+    await audit(req, "banner.create", "banner", String(banner._id), null, { title: banner.title });
+    res.json(ok({ banner: bannerDTO(banner.toObject()) }, "Banner created"));
+  } catch (e) {
+    res.status(500).json(fail("BANNER_CREATE_FAILED", e instanceof Error ? e.message : "Could not create banner"));
+  }
+});
+
+adminRouter.patch("/banners/:id", async (req: AuthedRequest, res) => {
+  try {
+    const banner = await Banner.findById(req.params.id);
+    if (!banner) return res.status(404).json(fail("BANNER_NOT_FOUND", "Banner not found"));
+
+    const before = banner.toObject();
+    const body = req.body ?? {};
+    if (body.imageUrl !== undefined) {
+      const imageUrl = String(body.imageUrl).trim();
+      if (!imageUrl) return res.status(400).json(fail("INVALID_IMAGE", "Banner image cannot be empty."));
+      banner.imageUrl = imageUrl;
+    }
+    if (body.title !== undefined) banner.title = String(body.title);
+    if (body.subtitle !== undefined) banner.subtitle = String(body.subtitle);
+    if (body.linkType !== undefined && ["NONE", "RESTAURANT", "SERVICE"].includes(body.linkType)) banner.linkType = body.linkType;
+    if (body.linkTargetId !== undefined) banner.linkTargetId = String(body.linkTargetId ?? "").trim() || null;
+    if (body.active !== undefined) banner.active = Boolean(body.active);
+    if (body.sortOrder !== undefined && Number.isFinite(Number(body.sortOrder))) banner.sortOrder = Number(body.sortOrder);
+
+    await banner.save();
+    await audit(req, "banner.edit", "banner", req.params.id, before, banner.toObject());
+    res.json(ok({ banner: bannerDTO(banner.toObject()) }, "Banner updated"));
+  } catch (e) {
+    res.status(500).json(fail("BANNER_UPDATE_FAILED", e instanceof Error ? e.message : "Could not update banner"));
+  }
+});
+
+adminRouter.delete("/banners/:id", async (req: AuthedRequest, res) => {
+  try {
+    const banner = await Banner.findByIdAndDelete(req.params.id);
+    if (!banner) return res.status(404).json(fail("BANNER_NOT_FOUND", "Banner not found"));
+    await audit(req, "banner.delete", "banner", req.params.id, { title: banner.title }, null);
+    res.json(ok({ deleted: true }, "Banner deleted"));
+  } catch (e) {
+    res.status(500).json(fail("BANNER_DELETE_FAILED", e instanceof Error ? e.message : "Could not delete banner"));
   }
 });

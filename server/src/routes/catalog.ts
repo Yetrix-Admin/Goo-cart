@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { Coupon, FoodItem, Restaurant } from "../models.js";
+import { Banner, Coupon, FoodItem, Restaurant } from "../models.js";
 import { ok, fail, escapeRegex } from "../lib/http.js";
 import { getPricingSettings } from "../lib/pricingSettings.js";
 
@@ -183,6 +183,28 @@ catalogRouter.get("/coupons", async (_req, res) => {
     );
   } catch (e) {
     res.status(500).json(fail("COUPONS_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load coupons"));
+  }
+});
+
+// Read-only, public: the home-screen promo carousel, admin-managed (see
+// admin.ts's /banners) rather than baked into the client.
+catalogRouter.get("/banners", async (_req, res) => {
+  try {
+    const rows = await Banner.find({ active: true }).sort({ sortOrder: 1, createdAt: 1 }).lean();
+    res.json(
+      ok({
+        banners: rows.map((b: any) => ({
+          id: String(b._id),
+          imageUrl: b.imageUrl,
+          title: b.title,
+          subtitle: b.subtitle,
+          linkType: b.linkType,
+          linkTargetId: b.linkTargetId,
+        })),
+      }),
+    );
+  } catch (e) {
+    res.status(500).json(fail("BANNERS_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load banners"));
   }
 });
 

@@ -87,18 +87,15 @@ export default function LoginScreen() {
           {mode === "signup" ? <Field label="Confirm password" value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry /> : null}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          {mode === "login" ? <PrimaryButton label="Login as guest" onPress={continueAsGuest} disabled={busy} /> : null}
           <PrimaryButton label={busy ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"} onPress={() => void submit()} disabled={busy} />
 
           <Pressable style={styles.switch} onPress={() => { setMode(mode === "signup" ? "login" : "signup"); setError(""); }}>
             <Text style={styles.switchText}>{mode === "signup" ? "Already have an account? Sign in" : "New to Goocart? Create an account"}</Text>
           </Pressable>
 
-          {mode === "signup" ? (
-            <Pressable style={styles.switch} onPress={continueAsGuest}>
-              <Text style={styles.switchText}>Not now — continue as guest</Text>
-            </Pressable>
-          ) : null}
+          <Pressable style={styles.switch} onPress={continueAsGuest}>
+            <Text style={styles.switchText}>{mode === "signup" ? "Not now — continue as guest" : "Continue as guest"}</Text>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

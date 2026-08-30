@@ -92,7 +92,7 @@ export default function ActivityScreen() {
   );
 }
 
-function ServiceActivityCard({order}:{order:ServiceOrder}){const code=String(order.details.verificationCode??"");return <View style={styles.serviceCard}><View><Text style={typography.captionStrong}>{order.service.toUpperCase()}</Text><Text style={typography.h3}>{order.reference}</Text><Text style={typography.caption}>{order.vendorName} • {order.status.replaceAll("_"," ")}</Text>{code?<Text style={styles.code}>Verification code: {code}</Text>:null}</View><Text style={typography.h3}>₹{order.total}</Text></View>}
+function ServiceActivityCard({order}:{order:ServiceOrder}){const code=String(order.details.verificationCode??"");return <Pressable style={styles.serviceCard} onPress={()=>router.push({pathname:"/service-orders/[id]",params:{id:order.id}})} accessibilityRole="button"><View><Text style={typography.captionStrong}>{order.service.toUpperCase()}</Text><Text style={typography.h3}>{order.reference}</Text><Text style={typography.caption}>{order.vendorName} • {order.status.replaceAll("_"," ")}</Text>{code?<Text style={styles.code}>Verification code: {code}</Text>:null}</View><Text style={typography.h3}>₹{order.total}</Text></Pressable>}
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },

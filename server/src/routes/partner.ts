@@ -2,7 +2,7 @@ import { Router } from "express";
 import { Order, ServiceOrder, User } from "../models.js";
 import { requireRole, canPartner, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
-import { isValidCoordinate } from "../lib/geo.js";
+import { haversineKm, isValidCoordinate } from "../lib/geo.js";
 import { emitOrderUpdate } from "../lib/realtime.js";
 import { unassignPartner } from "../lib/delivery.js";
 import { ACTIVE_DELIVERY_STATUSES } from "../lib/orderState.js";
@@ -121,16 +121,39 @@ partnerRouter.get("/earnings", async (req: AuthedRequest, res) => {
   }
 });
 
-const serviceJobDTO = (o: any) => ({
+const serviceJobDTO = (o: any, pickupDistanceKm: number | null = null) => ({
   id: String(o._id), reference: o.reference, service: o.service, vendorName: o.vendorName, customerName: o.customerName,
   status: o.status, total: o.total, details: o.details ?? {}, partnerId: o.partnerId ? String(o.partnerId) : null, partnerName: o.partnerName ?? null,
-  createdAt: o.createdAt, updatedAt: o.updatedAt,
+  pickupDistanceKm, createdAt: o.createdAt, updatedAt: o.updatedAt,
 });
 
 partnerRouter.get("/service-jobs", async (req: AuthedRequest, res) => {
   try {
-    const jobs = await ServiceOrder.find({ $or: [{ partnerId: req.user!._id }, { partnerId: null, status: "READY_FOR_PICKUP" }] }).sort({ createdAt: -1 }).limit(200).lean();
-    res.json(ok({ jobs: jobs.map(serviceJobDTO) }));
+    const partner = req.user!;
+    const jobs = await ServiceOrder.find({ $or: [{ partnerId: partner._id }, { partnerId: null, status: "READY_FOR_PICKUP" }] }).sort({ createdAt: -1 }).limit(200).lean();
+
+    const hasPartnerFix = isValidCoordinate(partner.currentLatitude, partner.currentLongitude);
+    const withDistance = jobs.map((job: any) => {
+      const pickupLat = job.details?.pickupLatitude;
+      const pickupLng = job.details?.pickupLongitude;
+      const pickupDistanceKm =
+        hasPartnerFix && isValidCoordinate(pickupLat, pickupLng)
+          ? Math.round(haversineKm({ latitude: partner.currentLatitude!, longitude: partner.currentLongitude! }, { latitude: pickupLat, longitude: pickupLng }) * 10) / 10
+          : null;
+      return { job, pickupDistanceKm };
+    });
+
+    // Unclaimed jobs surface nearest-pickup-first for this partner so they
+    // aren't picking blind from an arbitrary, creation-time-ordered pool —
+    // jobs already assigned to them keep their original order.
+    withDistance.sort((a, b) => {
+      const aPool = a.job.partnerId === null;
+      const bPool = b.job.partnerId === null;
+      if (aPool && bPool && a.pickupDistanceKm !== null && b.pickupDistanceKm !== null) return a.pickupDistanceKm - b.pickupDistanceKm;
+      return 0;
+    });
+
+    res.json(ok({ jobs: withDistance.map(({ job, pickupDistanceKm }) => serviceJobDTO(job, pickupDistanceKm)) }));
   } catch (e) {
     res.status(500).json(fail("SERVICE_JOBS_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load service jobs"));
   }
