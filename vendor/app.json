@@ -43,6 +43,13 @@
       "expo-font",
       "expo-notifications",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Goocart Vendor to access your photos to add a dish photo.",
+          "cameraPermission": "Allow Goocart Vendor to use the camera to take a dish photo."
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {

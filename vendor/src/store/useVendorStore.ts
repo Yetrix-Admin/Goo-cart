@@ -8,6 +8,7 @@ export type CreateMenuItemInput = {
   price: number;
   categoryKey: string;
   veg: boolean;
+  imageUrl?: string | null;
 };
 
 export type UpdateMenuItemInput = Partial<{
@@ -16,6 +17,7 @@ export type UpdateMenuItemInput = Partial<{
   price: number;
   veg: boolean;
   available: boolean;
+  imageUrl: string | null;
 }>;
 
 type VendorState = {

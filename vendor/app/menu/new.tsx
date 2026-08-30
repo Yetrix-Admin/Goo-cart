@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { PrimaryButton } from "@/components/PrimaryButton";
+import { DishImageField } from "@/components/DishImageField";
 import { colors, radius, spacing, typography } from "@/theme";
 import { useVendorStore } from "@/store/useVendorStore";
 
@@ -14,6 +15,7 @@ export default function NewMenuItemScreen() {
   const [price, setPrice] = useState("");
   const [categoryKey, setCategoryKey] = useState("");
   const [veg, setVeg] = useState(true);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -26,7 +28,7 @@ export default function NewMenuItemScreen() {
 
     setBusy(true);
     try {
-      await createMenuItem({ name: name.trim(), description: description.trim(), price: priceValue, categoryKey: categoryKey.trim(), veg });
+      await createMenuItem({ name: name.trim(), description: description.trim(), price: priceValue, categoryKey: categoryKey.trim(), veg, imageUrl });
       router.back();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create this item");
@@ -40,6 +42,7 @@ export default function NewMenuItemScreen() {
       <ScreenHeader title="Add dish" />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <DishImageField value={imageUrl} onChange={setImageUrl} />
           <Field label="Dish name" value={name} onChangeText={setName} />
           <Field label="Description" value={description} onChangeText={setDescription} multiline />
           <Field label="Category" value={categoryKey} onChangeText={setCategoryKey} placeholder="e.g. Starters" />

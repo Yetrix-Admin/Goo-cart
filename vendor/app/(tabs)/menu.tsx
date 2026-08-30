@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { FlatList, Pressable, RefreshControl, StyleSheet, Switch, Text, View } from "react-native";
+import { FlatList, Image, Pressable, RefreshControl, StyleSheet, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { EmptyState } from "@/components/EmptyState";
@@ -52,6 +52,13 @@ export default function MenuScreen() {
         renderItem={({ item }) => (
           <Pressable onPress={() => router.push({ pathname: "/menu/[id]", params: { id: item.id } })} style={styles.card}>
             <View style={styles.cardRow}>
+              {item.imageUrl ? (
+                <Image source={{ uri: item.imageUrl }} style={styles.thumb} resizeMode="cover" />
+              ) : (
+                <View style={styles.thumbEmpty}>
+                  <Icon name="image" size={18} color={colors.muted} />
+                </View>
+              )}
               <VegBadge veg={item.veg} />
               <View style={{ flex: 1 }}>
                 <Text style={typography.h3}>{item.name}</Text>
@@ -89,6 +96,8 @@ const styles = StyleSheet.create({
   content: { padding: spacing.xl, flexGrow: 1 },
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg },
   cardRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  thumb: { width: 44, height: 44, borderRadius: radius.sm },
+  thumbEmpty: { width: 44, height: 44, borderRadius: radius.sm, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
   copy: { ...typography.body, color: colors.muted },
   error: { ...typography.caption, color: colors.error, textAlign: "center", paddingBottom: spacing.md },
 });

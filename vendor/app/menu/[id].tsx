@@ -5,6 +5,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { EmptyState } from "@/components/EmptyState";
+import { DishImageField } from "@/components/DishImageField";
 import { colors, radius, spacing, typography } from "@/theme";
 import { useVendorStore } from "@/store/useVendorStore";
 
@@ -18,6 +19,7 @@ export default function EditMenuItemScreen() {
   const [price, setPrice] = useState(item ? String(item.price) : "");
   const [veg, setVeg] = useState(item?.veg ?? true);
   const [available, setAvailable] = useState(item?.available ?? true);
+  const [imageUrl, setImageUrl] = useState<string | null>(item?.imageUrl ?? null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -38,7 +40,7 @@ export default function EditMenuItemScreen() {
 
     setBusy(true);
     try {
-      await updateMenuItem(id, { name: name.trim(), description: description.trim(), price: priceValue, veg, available });
+      await updateMenuItem(id, { name: name.trim(), description: description.trim(), price: priceValue, veg, available, imageUrl });
       router.back();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save changes");
@@ -52,6 +54,7 @@ export default function EditMenuItemScreen() {
       <ScreenHeader title="Edit dish" subtitle={item.name} />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <DishImageField value={imageUrl} onChange={setImageUrl} />
           <Field label="Dish name" value={name} onChangeText={setName} />
           <Field label="Description" value={description} onChangeText={setDescription} multiline />
           <Field label="Price (₹)" value={price} onChangeText={setPrice} keyboardType="numeric" />

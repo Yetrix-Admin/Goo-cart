@@ -27,6 +27,7 @@ export const ICONS = {
   power: "power-outline",
   empty: "file-tray-outline",
   storefront: "storefront-outline",
+  image: "image-outline",
 } as const;
 
 export type IconName = keyof typeof ICONS;
