@@ -8,7 +8,6 @@ import { VegBadge } from "@/components/VegBadge";
 import { RemoteImage } from "@/components/RemoteImage";
 import { colors, radius, spacing, typography } from "@/theme";
 import { restaurantService } from "@/services/RestaurantService";
-import { serviceMeta } from "@/constants/services";
 import { ServiceType } from "@/types";
 import { SearchResult } from "@/services/RestaurantService";
 
@@ -34,7 +33,17 @@ export default function SearchScreen() {
     };
   }, [query]);
 
-  const meta = service && service !== "FOOD" ? serviceMeta(service) : null;
+  // Grocery/Vegetables/Mart/Bike Taxi/Parcel are fully built — they live at
+  // /service/[type] (browsing + checkout, or map-based booking) rather than
+  // in this food-search screen, so a service deep link goes straight there
+  // instead of claiming the service "isn't built yet".
+  useEffect(() => {
+    if (service && service !== "FOOD") {
+      router.replace({ pathname: "/service/[type]", params: { type: service } });
+    }
+  }, [service]);
+
+  if (service && service !== "FOOD") return null;
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -42,15 +51,7 @@ export default function SearchScreen() {
         <SearchBar placeholder="Search food, grocery, products or stores..." value={query} onChangeText={setQuery} />
       </View>
 
-      {meta ? (
-        <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-          <EmptyState
-            icon={meta.icon}
-            title={`${meta.label} is coming next`}
-            copy={`Browsing, product details and checkout for ${meta.label} land in the next build phase. Food search works right now — try typing a dish or restaurant above.`}
-          />
-        </ScrollView>
-      ) : !query.trim() ? (
+      {!query.trim() ? (
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           <Text style={typography.h3}>Recent Searches</Text>
           <View style={styles.chipRow}>

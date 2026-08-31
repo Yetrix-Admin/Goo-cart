@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { Image, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Brand } from "@/components/Brand";
 import { EmptyState } from "@/components/EmptyState";
@@ -70,6 +70,13 @@ export default function HomeScreen() {
 
         <View style={styles.card}>
           <View style={styles.cardRow}>
+            {restaurant.imageUrl ? (
+              <Image source={{ uri: restaurant.imageUrl }} style={styles.restaurantThumb} resizeMode="cover" />
+            ) : (
+              <View style={styles.restaurantThumbEmpty}>
+                <Icon name="storefront" size={18} color={colors.muted} />
+              </View>
+            )}
             <View style={{ flex: 1 }}>
               <Text style={typography.h2}>{restaurant.name}</Text>
               <Text style={styles.copy}>{restaurant.area}</Text>
@@ -107,6 +114,8 @@ const styles = StyleSheet.create({
   content: { padding: spacing.xl, paddingTop: 0, gap: spacing.md },
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm },
   cardRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  restaurantThumb: { width: 48, height: 48, borderRadius: radius.md },
+  restaurantThumbEmpty: { width: 48, height: 48, borderRadius: radius.md, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
   statRow: { flexDirection: "row", gap: spacing.md },
   statCard: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, gap: 4, alignItems: "flex-start" },
   copy: { ...typography.body, color: colors.muted },

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { EmptyState } from "@/components/EmptyState";
 import { OrderHistoryCard } from "@/components/OrderHistoryCard";
 import { colors, radius, spacing, typography } from "@/theme";
@@ -14,7 +14,10 @@ type ActivityTab = "ORDERS" | "RIDES" | "PARCELS";
 type OrderFilter = "ALL" | ServiceType;
 
 export default function ActivityScreen() {
-  const [tab, setTab] = useState<ActivityTab>("ORDERS");
+  const { tab: initialTab } = useLocalSearchParams<{ tab?: string }>();
+  const [tab, setTab] = useState<ActivityTab>(
+    initialTab === "RIDES" || initialTab === "PARCELS" ? initialTab : "ORDERS"
+  );
   const [filter, setFilter] = useState<OrderFilter>("ALL");
   const orders = useOrderStore((s) => s.orders);
   const loading = useOrderStore((s) => s.loading);

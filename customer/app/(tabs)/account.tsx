@@ -19,8 +19,8 @@ export default function AccountScreen() {
 
   const rows: Row[] = [
     { label: "My Orders", onPress: () => (user ? router.push("/(tabs)/activity") : requireSignIn("/(tabs)/activity")) },
-    { label: "My Rides", onPress: () => notAvailableYet("My Rides") },
-    { label: "My Parcels", onPress: () => notAvailableYet("My Parcels") },
+    { label: "My Rides", onPress: () => (user ? router.push({ pathname: "/(tabs)/activity", params: { tab: "RIDES" } }) : requireSignIn("/(tabs)/activity")) },
+    { label: "My Parcels", onPress: () => (user ? router.push({ pathname: "/(tabs)/activity", params: { tab: "PARCELS" } }) : requireSignIn("/(tabs)/activity")) },
     { label: "Saved Addresses", onPress: () => (user ? router.push("/checkout/address") : requireSignIn("/checkout/address")) },
     { label: "Favorites", onPress: () => router.push("/favorites") },
     { label: "Payments", onPress: () => notAvailableYet("Payments") },
