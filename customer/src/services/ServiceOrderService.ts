@@ -2,7 +2,8 @@ import { apiGet, apiPost } from "@/services/apiClient";
 
 export type ServiceProduct = { id:string; service:string; vendorId:string; vendorName:string; name:string; description:string; imageUrl:string|null; price:number; stock:number; rating:number; eta:string };
 export type ServicePricing = { service:string; baseFare:number; perKm:number; platformFee:number; partnerPayoutPercent:number };
-export type ServiceOrder = { id:string; reference:string; service:string; vendorName:string; status:string; total:number; details:Record<string,unknown>; partner:{id:string;name:string|null}|null; createdAt:string; updatedAt:string };
+export type ServiceOrderPartner = { id:string; name:string|null; photoUrl?:string|null; vehicleType?:string|null; vehicleNumber?:string|null; partnerRating?:number|null };
+export type ServiceOrder = { id:string; reference:string; service:string; vendorName:string; status:string; total:number; details:Record<string,unknown>; partner:ServiceOrderPartner|null; createdAt:string; updatedAt:string };
 export type FarePreview = { distanceKm:number; baseFare:number; perKm:number; platformFee:number; fare:number; total:number };
 
 export const serviceOrderService = {

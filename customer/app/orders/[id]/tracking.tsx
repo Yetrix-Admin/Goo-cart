@@ -7,6 +7,7 @@ import { OrderStatusTimeline } from "@/components/OrderStatusTimeline";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { EmptyState } from "@/components/EmptyState";
 import { TrackingMap } from "@/components/TrackingMap";
+import { RemoteImage } from "@/components/RemoteImage";
 import { colors, radius, spacing, typography } from "@/theme";
 import { Icon } from "@/components/Icon";
 import { useOrderStore } from "@/store/useOrderStore";
@@ -190,13 +191,23 @@ export default function OrderTrackingScreen() {
 
             {order.deliveryPartner ? (
               <View style={styles.partnerCard}>
-                <View style={styles.partnerAvatar}>
-                  <Text style={styles.partnerInitials}>{(order.deliveryPartner.name ?? "R").slice(0, 2).toUpperCase()}</Text>
-                </View>
+                <RemoteImage
+                  uri={order.deliveryPartner.photoUrl}
+                  fallbackLabel={order.deliveryPartner.name ?? "R"}
+                  style={styles.partnerAvatar}
+                />
                 <View style={{ flex: 1 }}>
                   <Text style={typography.bodyStrong}>{order.deliveryPartner.name}</Text>
-                  <Text style={typography.caption}>Your delivery partner</Text>
+                  <Text style={typography.caption}>
+                    {[order.deliveryPartner.vehicleType, order.deliveryPartner.vehicleNumber].filter(Boolean).join(" • ") || "Your delivery partner"}
+                  </Text>
                 </View>
+                {order.deliveryPartner.partnerRating ? (
+                  <View style={styles.partnerRating}>
+                    <Icon name="star" size={13} color={colors.warning} />
+                    <Text style={styles.partnerRatingText}>{order.deliveryPartner.partnerRating.toFixed(1)}</Text>
+                  </View>
+                ) : null}
               </View>
             ) : null}
 
@@ -238,8 +249,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.md,
   },
-  partnerAvatar: { width: 44, height: 44, borderRadius: radius.md, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center" },
-  partnerInitials: { color: colors.white, fontWeight: "800" },
+  partnerAvatar: { width: 44, height: 44, borderRadius: radius.md },
+  partnerRating: { flexDirection: "row", alignItems: "center", gap: 3 },
+  partnerRatingText: { ...typography.captionStrong },
   otpCard: { backgroundColor: colors.primaryMuted, borderRadius: radius.md, padding: spacing.lg, alignItems: "center", gap: 4 },
   otpLabel: { ...typography.caption, color: colors.primary, fontWeight: "800", letterSpacing: 0.6, textAlign: "center" },
   otpValue: { fontSize: 32, fontWeight: "800", color: colors.text, letterSpacing: 8 },

@@ -201,11 +201,16 @@ export type OrderStatusEvent = {
 export type PaymentMethod = "UPI" | "GPAY" | "PHONEPE" | "PAYTM" | "CARD" | "NETBANKING" | "WALLET" | "COD";
 export type PaymentStatus = "PENDING" | "PAID" | "FAILED" | "NOT_APPLICABLE";
 
-// Only what the orders API exposes. Vehicle/rating details belong to the
-// delivery-partner profile domain, which is not built yet.
+// photoUrl/vehicle/rating are only populated on the single-order detail
+// endpoint (GET /orders/:id), not the list endpoint, to avoid an N+1 lookup
+// there — see server/src/routes/orders.ts.
 export type DeliveryPartnerSummary = {
   id: string;
   name: string | null;
+  photoUrl?: string | null;
+  vehicleType?: string | null;
+  vehicleNumber?: string | null;
+  partnerRating?: number | null;
 };
 
 export type FoodOrder = {

@@ -8,7 +8,7 @@ import { PrimaryButton } from "@/components/PrimaryButton";
 import { Icon } from "@/components/Icon";
 import { colors, radius, spacing, typography } from "@/theme";
 import { locationService } from "@/services/LocationService";
-import { PlaceResult, reverseGeocode, searchPlaces } from "@/services/PlacesService";
+import { PlaceSuggestion, resolvePlace, reverseGeocode, searchPlaces } from "@/services/PlacesService";
 import { useRideBookingStore } from "@/store/useRideBookingStore";
 
 const DEFAULT_DELTA = 0.01;
@@ -30,8 +30,9 @@ export default function LocationPickerScreen() {
   const [resolving, setResolving] = useState(false);
   const [locating, setLocating] = useState(false);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<PlaceResult[]>([]);
+  const [results, setResults] = useState<PlaceSuggestion[]>([]);
   const [searching, setSearching] = useState(false);
+  const [resolvingResult, setResolvingResult] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -95,14 +96,22 @@ export default function LocationPickerScreen() {
     }, SEARCH_DEBOUNCE_MS);
   };
 
-  const pickResult = (result: PlaceResult) => {
+  const pickResult = async (result: PlaceSuggestion) => {
     Keyboard.dismiss();
-    const next = { latitude: result.latitude, longitude: result.longitude, latitudeDelta: DEFAULT_DELTA, longitudeDelta: DEFAULT_DELTA };
-    mapRef.current?.animateToRegion(next, 400);
-    setRegion(next);
-    setAddress(result.label);
-    setQuery("");
+    setQuery(result.label);
     setResults([]);
+    setResolvingResult(true);
+    try {
+      const resolved = await resolvePlace(result);
+      if (!resolved) return;
+      const next = { latitude: resolved.latitude, longitude: resolved.longitude, latitudeDelta: DEFAULT_DELTA, longitudeDelta: DEFAULT_DELTA };
+      mapRef.current?.animateToRegion(next, 400);
+      setRegion(next);
+      setAddress(resolved.address || result.label);
+    } finally {
+      setResolvingResult(false);
+      setQuery("");
+    }
   };
 
   const confirm = () => {
@@ -114,7 +123,7 @@ export default function LocationPickerScreen() {
   };
 
   const title = field === "drop" ? "Set drop location" : "Set pickup location";
-  const canConfirm = useMemo(() => Boolean(region && address && !resolving), [region, address, resolving]);
+  const canConfirm = useMemo(() => Boolean(region && address && !resolving && !resolvingResult), [region, address, resolving, resolvingResult]);
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -136,7 +145,12 @@ export default function LocationPickerScreen() {
         {results.length > 0 && (
           <View style={styles.resultsList}>
             {results.map((result, index) => (
-              <Pressable key={`${result.latitude}-${result.longitude}-${index}`} style={styles.resultRow} onPress={() => pickResult(result)}>
+              <Pressable
+                key={result.placeId ?? `${result.latitude}-${result.longitude}-${index}`}
+                style={styles.resultRow}
+                onPress={() => void pickResult(result)}
+                disabled={resolvingResult}
+              >
                 <Icon name="location" size={15} color={colors.muted} />
                 <Text style={styles.resultText} numberOfLines={2}>{result.label}</Text>
               </Pressable>

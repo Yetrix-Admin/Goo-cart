@@ -305,7 +305,23 @@ ordersRouter.get("/:id", requireAuth, async (req: AuthedRequest, res) => {
     const order: any = await Order.findById(req.params.id).lean().catch(() => null);
     if (!order) return res.status(404).json(fail("ORDER_NOT_FOUND", "Order not found"));
     if (!(await mayView(req.user!, order))) return res.status(403).json(fail("FORBIDDEN", "This order is outside your scope"));
-    res.json(ok({ order: toOrderDTO(order, req.user!) }));
+    const dto: any = toOrderDTO(order, req.user!);
+    // Only fetched for this single-order view (not the list endpoint above)
+    // to avoid an N+1 lookup — the customer sees who's delivering and what
+    // to look for, matching every other delivery app's tracking screen.
+    if (dto.deliveryPartner && order.partnerId) {
+      const partner: any = await User.findById(order.partnerId, { photoUrl: 1, vehicleType: 1, vehicleNumber: 1, partnerRating: 1 }).lean().catch(() => null);
+      if (partner) {
+        dto.deliveryPartner = {
+          ...dto.deliveryPartner,
+          photoUrl: partner.photoUrl ?? null,
+          vehicleType: partner.vehicleType ?? null,
+          vehicleNumber: partner.vehicleNumber ?? null,
+          partnerRating: partner.partnerRating ?? null,
+        };
+      }
+    }
+    res.json(ok({ order: dto }));
   } catch (e) {
     res.status(500).json(fail("ORDER_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load order"));
   }

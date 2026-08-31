@@ -4,6 +4,7 @@ import { requireAuth, type AuthedRequest } from "../lib/auth.js";
 import { ok, fail } from "../lib/http.js";
 import { haversineKm, isValidCoordinate } from "../lib/geo.js";
 import { geocodeAddress } from "../lib/geocode.js";
+import { autocompletePlaces, drivingDistanceKm, getPlaceDetails } from "../lib/googlePlaces.js";
 import { getPricingSettings } from "../lib/pricingSettings.js";
 import { reserveLines, consumeReservations, releaseReservations } from "../lib/inventory.js";
 
@@ -242,11 +243,27 @@ const SERVICE_NAMES: Record<string, string> = {
   PARCEL: "Parcel",
 };
 
-const serviceOrderDTO = (o: any) => ({
-  id: String(o._id), reference: o.reference, service: o.service, vendorName: o.vendorName, status: o.status,
-  total: o.total, details: o.details ?? {}, partner: o.partnerId ? { id: String(o.partnerId), name: o.partnerName ?? null } : null,
-  createdAt: o.createdAt, updatedAt: o.updatedAt,
-});
+// partnerMap is an optional batched lookup (one query for every distinct
+// partner across the whole result set, not one per order) so the customer
+// can see who's on their ride/delivery — photo, vehicle, rating — the same
+// way food-order tracking already does.
+const serviceOrderDTO = (o: any, partnerMap?: Map<string, any>) => {
+  const partnerExtra = o.partnerId ? partnerMap?.get(String(o.partnerId)) : null;
+  return {
+    id: String(o._id), reference: o.reference, service: o.service, vendorName: o.vendorName, status: o.status,
+    total: o.total, details: o.details ?? {},
+    partner: o.partnerId
+      ? {
+          id: String(o.partnerId), name: o.partnerName ?? null,
+          photoUrl: partnerExtra?.photoUrl ?? null,
+          vehicleType: partnerExtra?.vehicleType ?? null,
+          vehicleNumber: partnerExtra?.vehicleNumber ?? null,
+          partnerRating: partnerExtra?.partnerRating ?? null,
+        }
+      : null,
+    createdAt: o.createdAt, updatedAt: o.updatedAt,
+  };
+};
 
 customerRouter.get("/services", async (_req, res) => {
   try {
@@ -281,10 +298,11 @@ async function geocodeTrip(
     dropCoords ?? geocodeAddress(drop),
   ]);
   if (!pickupPoint || !dropPoint) return null;
-  const straightLineKm = haversineKm(pickupPoint, dropPoint);
-  // Nominatim only gives straight-line distance; a 35% padding approximates
-  // real road distance without a paid routing provider.
-  const roadKm = Math.round(straightLineKm * 1.35 * 10) / 10;
+  // Real driving distance when Google's Distance Matrix is configured
+  // (GOOGLE_PLACES_API_KEY — see googlePlaces.ts); a 35% padding over
+  // straight-line distance approximates it otherwise, same as before.
+  const googleKm = await drivingDistanceKm(pickupPoint, dropPoint);
+  const roadKm = googleKm ?? Math.round(haversineKm(pickupPoint, dropPoint) * 1.35 * 10) / 10;
   const distanceKm = Math.min(50, Math.max(1, roadKm));
   return { distanceKm, pickup: pickupPoint, drop: dropPoint };
 }
@@ -317,6 +335,35 @@ customerRouter.get("/services/fare-preview", async (req, res) => {
   }
 });
 
+// Search-as-you-type suggestions for the pickup/drop map picker
+// (location-picker.tsx). Falls back to an empty list if
+// GOOGLE_PLACES_API_KEY isn't configured — the client's own Nominatim
+// fallback (PlacesService.ts) still works either way.
+customerRouter.get("/places/autocomplete", requireAuth, async (req, res) => {
+  try {
+    const input = String(req.query.input ?? "");
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    const near = isValidCoordinate(lat, lng) ? { latitude: lat, longitude: lng } : undefined;
+    const results = await autocompletePlaces(input, near);
+    res.json(ok({ results }));
+  } catch (e) {
+    res.status(500).json(fail("PLACES_UNAVAILABLE", e instanceof Error ? e.message : "Could not search places"));
+  }
+});
+
+customerRouter.get("/places/details", requireAuth, async (req, res) => {
+  try {
+    const placeId = String(req.query.placeId ?? "");
+    if (!placeId) return res.status(400).json(fail("INVALID_PLACE", "placeId is required."));
+    const details = await getPlaceDetails(placeId);
+    if (!details) return res.status(404).json(fail("PLACE_NOT_FOUND", "Could not resolve this place."));
+    res.json(ok(details));
+  } catch (e) {
+    res.status(500).json(fail("PLACE_DETAILS_FAILED", e instanceof Error ? e.message : "Could not load this place"));
+  }
+});
+
 customerRouter.get("/services/:key/products", async (req, res) => {
   try {
     const service = SERVICE_NAMES[String(req.params.key).toUpperCase()];
@@ -332,8 +379,13 @@ customerRouter.get("/services/:key/products", async (req, res) => {
 
 customerRouter.get("/service-orders", requireAuth, async (req: AuthedRequest, res) => {
   try {
-    const orders = await ServiceOrder.find({ customerId: req.user!._id }).sort({ createdAt: -1 }).limit(200).lean();
-    res.json(ok({ orders: orders.map(serviceOrderDTO) }));
+    const orders: any[] = await ServiceOrder.find({ customerId: req.user!._id }).sort({ createdAt: -1 }).limit(200).lean();
+    const partnerIds = [...new Set(orders.map((o) => o.partnerId).filter(Boolean).map(String))];
+    const partners = partnerIds.length
+      ? await User.find({ _id: { $in: partnerIds } }, { photoUrl: 1, vehicleType: 1, vehicleNumber: 1, partnerRating: 1 }).lean()
+      : [];
+    const partnerMap = new Map(partners.map((p: any) => [String(p._id), p]));
+    res.json(ok({ orders: orders.map((o) => serviceOrderDTO(o, partnerMap)) }));
   } catch (e) {
     res.status(500).json(fail("SERVICE_ORDERS_UNAVAILABLE", e instanceof Error ? e.message : "Unable to load your activity"));
   }

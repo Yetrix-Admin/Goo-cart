@@ -24,6 +24,8 @@ const publicProfile = (u: any) => ({
   partnerApprovalStatus: u.partnerApprovalStatus,
   partnerOnline: u.partnerOnline,
   partnerBusy: u.partnerBusy,
+  partnerRating: u.partnerRating,
+  partnerCompletedDeliveries: u.partnerCompletedDeliveries,
 });
 
 partnerRouter.get("/status", async (req: AuthedRequest, res) => {

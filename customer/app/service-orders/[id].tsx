@@ -6,6 +6,7 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { Icon } from "@/components/Icon";
+import { RemoteImage } from "@/components/RemoteImage";
 import { serviceOrderService, ServiceOrder } from "@/services/ServiceOrderService";
 import { colors, radius, spacing, typography } from "@/theme";
 
@@ -136,13 +137,19 @@ export default function ServiceOrderTrackingScreen() {
 
             {order.partner ? (
               <View style={styles.partnerCard}>
-                <View style={styles.partnerAvatar}>
-                  <Text style={styles.partnerInitials}>{(order.partner.name ?? "P").slice(0, 2).toUpperCase()}</Text>
-                </View>
+                <RemoteImage uri={order.partner.photoUrl} fallbackLabel={order.partner.name ?? "P"} style={styles.partnerAvatar} />
                 <View style={{ flex: 1 }}>
                   <Text style={typography.bodyStrong}>{order.partner.name}</Text>
-                  <Text style={typography.caption}>Your {isRide ? "driver" : "delivery partner"}</Text>
+                  <Text style={typography.caption}>
+                    {[order.partner.vehicleType, order.partner.vehicleNumber].filter(Boolean).join(" • ") || `Your ${isRide ? "driver" : "delivery partner"}`}
+                  </Text>
                 </View>
+                {order.partner.partnerRating ? (
+                  <View style={styles.partnerRating}>
+                    <Icon name="star" size={13} color={colors.warning} />
+                    <Text style={styles.partnerRatingText}>{order.partner.partnerRating.toFixed(1)}</Text>
+                  </View>
+                ) : null}
               </View>
             ) : null}
 
@@ -187,8 +194,9 @@ const styles = StyleSheet.create({
   liveTag: { ...typography.caption, color: colors.success, fontWeight: "700", marginTop: spacing.xs },
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.lg, gap: 4 },
   partnerCard: { flexDirection: "row", alignItems: "center", gap: spacing.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md },
-  partnerAvatar: { width: 44, height: 44, borderRadius: radius.md, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center" },
-  partnerInitials: { color: colors.white, fontWeight: "800" },
+  partnerAvatar: { width: 44, height: 44, borderRadius: radius.md },
+  partnerRating: { flexDirection: "row", alignItems: "center", gap: 3 },
+  partnerRatingText: { ...typography.captionStrong },
   otpCard: { backgroundColor: colors.primaryMuted, borderRadius: radius.md, padding: spacing.lg, alignItems: "center", gap: 4 },
   otpLabel: { ...typography.caption, color: colors.primary, fontWeight: "800", letterSpacing: 0.6, textAlign: "center" },
   otpValue: { fontSize: 32, fontWeight: "800", color: colors.text, letterSpacing: 8 },

@@ -41,3 +41,10 @@ services:
         sync: false
       - key: PARTNER_USER_EMAILS
         sync: false
+      # Real Bike Taxi/Parcel address search and driving-distance fares
+      # (Google Places API + Distance Matrix API). Must be a server-side-only
+      # key with no application restriction — the customer app's Android-
+      # restricted Maps key cannot make these plain HTTPS calls. Falls back
+      # to free Nominatim/haversine estimates if left unset.
+      - key: GOOGLE_PLACES_API_KEY
+        sync: false
